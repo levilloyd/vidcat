@@ -103,6 +103,12 @@ length, "needs a better name", and "possible duplicates". Click a video to play 
 "Show in Finder" or Download (or convert them with `vidcat transcode`). The server only listens on localhost and
 rejects foreign Host/Origin headers, because it can rename files and has no login.
 
+**Saving a set of videos.** "Save all…" copies every video in the current results (all of them, not just the ones
+loaded on the page) into a folder you pick in the macOS folder dialog, side by side. It shows progress and can be
+cancelled. Nothing is ever overwritten (a clashing name gets ` (2)`), a file only gets its real name once it's
+completely copied, it won't start without enough free space, modified dates are kept, and the originals are
+only read.
+
 **Rotating.** Videos shot sideways can be turned in the player with the ⟲ / ⟳ buttons, or the `Shift+R` / `R`
 keys. It's a viewing setting saved in the catalog: it applies to the player and the thumbnail, survives rescans,
 moves, transcoding and duplicate removal, and never modifies the video file. Turned videos use a simple built-in

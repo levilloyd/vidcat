@@ -53,7 +53,20 @@
     </aside>
 
     <main>
-      <div id="summary" aria-live="polite"></div>
+      <div class="toolbar">
+        <div id="summary" aria-live="polite"></div>
+        <button id="saveAll" type="button" class="secondary" hidden title="Copy every video in these results to a folder you choose">Save all…</button>
+      </div>
+      <div id="exportBox" class="export" hidden>
+        <div class="row">
+          <span id="exportText" aria-live="polite"></span>
+          <button id="exportCancel" type="button" class="secondary">Cancel</button>
+          <button id="exportReveal" type="button" class="secondary" hidden>Show in Finder</button>
+          <button id="exportDismiss" type="button" class="link" hidden>Dismiss</button>
+        </div>
+        <progress id="exportProgress" max="1" value="0"></progress>
+        <details id="exportSkippedBox" hidden><summary id="exportSkippedSummary"></summary><ul id="exportSkipped"></ul></details>
+      </div>
       <div id="grid"></div>
       <button id="more" type="button" hidden>Load more</button>
     </main>

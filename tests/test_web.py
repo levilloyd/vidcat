@@ -143,3 +143,112 @@ def test_frontend_is_served(client):
     r = client.get("/")
     assert r.status_code == 200 and "Video Library" in r.text
     assert client.get("/app.js").status_code == 200
+
+
+# ---------- "Save all": copy every matching video to a chosen folder
+
+@pytest.fixture
+def saver(tmp_path, library):
+    """A client whose folder picker returns `picked["dest"]` (None = the user cancelled)."""
+    db = tmp_path / "save.db"
+    conn = connect(db)
+    scanner.scan(conn, [library], tmp_path / "thumbs")
+    conn.close()
+    picked = {"dest": tmp_path / "Saved", "prompts": []}
+    picked["dest"].mkdir()
+
+    def choose(prompt):
+        picked["prompts"].append(prompt)
+        return str(picked["dest"]) if picked["dest"] else None
+
+    with TestClient(create_app(db, choose_folder=choose)) as c:
+        yield c, picked
+
+
+def wait_for_save(client):
+    import time
+    for _ in range(200):
+        job = client.get("/api/export").json()
+        if job["state"] != "running":
+            return job
+        time.sleep(0.05)
+    raise AssertionError("save never finished")
+
+
+def test_save_all_copies_every_match_without_overwriting(saver, library):
+    client, picked = saver
+    dest = picked["dest"]
+    (dest / "Beach Trip.mp4").write_bytes(b"already here")
+
+    r = client.post("/api/export")
+    assert r.status_code == 200 and r.json()["total"] == 3
+    assert picked["prompts"] == [f"Save 3 videos ({r.json()['total_bytes'] / 1024:.1f} KB) to:"]
+    job = wait_for_save(client)
+    assert (job["state"], job["copied"], job["skipped"]) == ("done", 3, [])
+
+    assert (dest / "Beach Trip.mp4").read_bytes() == b"already here"  # never overwritten
+    for src in library.rglob("*.mp4"):
+        copy = dest / (src.name if src.name != "Beach Trip.mp4" else "Beach Trip (2).mp4")
+        assert copy.read_bytes() == src.read_bytes()
+        assert abs(copy.stat().st_mtime - src.stat().st_mtime) < 1  # modified date kept
+    assert not list(dest.glob(".*"))  # no temp files left
+    assert sorted(p.name for p in library.rglob("*.mp4")) == ["Beach Trip.mp4", "IMG_0001.mp4", "MVI_0002.mp4"]
+
+
+def test_save_all_uses_the_current_filters(saver):
+    client, picked = saver
+    client.post("/api/export", params={"q": "beach"})
+    assert wait_for_save(client)["copied"] == 1
+    assert [p.name for p in picked["dest"].iterdir()] == ["Beach Trip.mp4"]
+    assert client.post("/api/export", params={"q": "no such video"}).status_code == 400
+
+
+def test_save_all_cancelled_picker_copies_nothing(saver):
+    client, picked = saver
+    picked["dest"], saved = None, picked["dest"]
+    assert client.post("/api/export").json()["state"] == "not started"
+    assert client.get("/api/export").json()["state"] == "none"
+    assert not any(saved.iterdir())
+
+
+def test_save_all_refuses_when_there_is_no_room(saver, monkeypatch):
+    from collections import namedtuple
+    client, picked = saver
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr("vidcat.export.shutil.disk_usage", lambda p: usage(10**9, 10**9 - 100, 100))
+    r = client.post("/api/export")
+    assert r.status_code == 409 and "Not enough space" in r.json()["detail"]
+    assert not any(picked["dest"].iterdir())
+
+
+def test_save_all_skips_missing_files(saver, library):
+    client, picked = saver
+    (library / "Summer Trip" / "IMG_0001.mp4").unlink()
+    client.post("/api/export")
+    job = wait_for_save(client)
+    assert (job["state"], job["copied"]) == ("done", 2)
+    assert job["skipped"] == [{"name": "IMG_0001.mp4", "reason": "file is missing"}]
+
+
+def test_cancelled_save_leaves_no_partial_file(tmp_path, clip_dir, monkeypatch):
+    import threading
+    from vidcat import export
+
+    class CancelPartWay(threading.Event):
+        """Reports "cancelled" once the copy is a few chunks into the file."""
+        def __init__(self, after):
+            super().__init__()
+            self.after = after
+
+        def is_set(self):
+            self.after -= 1
+            return self.after < 0
+
+    monkeypatch.setattr(export, "CHUNK", 64)  # many small reads, so the cancel lands mid-file
+    dest = tmp_path / "out"
+    dest.mkdir()
+    src = clip_dir / "b.mp4"
+    job = export.ExportJob(dest=dest, files=[(str(src), "b.mp4", src.stat().st_size)], cancel_event=CancelPartWay(5))
+    export.run(job)
+    assert (job.state, job.copied, job.done_bytes) == ("cancelled", 0, 0)
+    assert list(dest.iterdir()) == []

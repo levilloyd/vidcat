@@ -98,6 +98,8 @@ function renderGrid(fromIndex) {
   for (let i = fromIndex; i < state.items.length; i++) grid.append(makeCard(state.items[i], i));
   $("summary").textContent = `${state.total.toLocaleString()} video${state.total === 1 ? "" : "s"}`;
   $("more").hidden = state.items.length >= state.total;
+  $("saveAll").hidden = state.total === 0;
+  $("saveAll").textContent = state.total === 1 ? "Save…" : `Save all ${state.total.toLocaleString()}…`;
 }
 
 function makeCard(v, index) {
@@ -371,9 +373,72 @@ function bindModal() {
   $("reveal").addEventListener("click", () => api(`/api/videos/${state.items[state.current].id}/reveal`, { method: "POST" }).catch((e) => setStatus(e.message, true)));
 }
 
+// ---------- save all results to a folder (the server copies them; the page shows progress)
+function exportMessage(text, isError = false) {
+  $("exportBox").hidden = false;
+  $("exportText").textContent = text;
+  $("exportText").classList.toggle("error", isError);
+  for (const id of ["exportCancel", "exportReveal", "exportProgress", "exportSkippedBox"]) $(id).hidden = true;
+  $("exportDismiss").hidden = false;
+}
+
+function renderExport(job) {
+  if (!job || job.state === "none" || job.state === "not started") { $("exportBox").hidden = true; return; }
+  const running = job.state === "running";
+  const n = (count) => `${count.toLocaleString()} video${count === 1 ? "" : "s"}`;
+  const text = {
+    running: `Saving ${n(job.total)} to ${job.dest}: ${job.copied.toLocaleString()} done, ` +
+      `${fmtSize(job.done_bytes)} of ${fmtSize(job.total_bytes)}${job.current ? ` — ${job.current}` : ""}`,
+    done: `Saved ${n(job.copied)} to ${job.dest}.`,
+    cancelled: `Cancelled. ${n(job.copied)} saved to ${job.dest}; the one being copied was discarded.`,
+    failed: `${job.error} ${n(job.copied)} saved to ${job.dest}.`,
+  }[job.state];
+  exportMessage(text, job.state === "failed");
+  $("exportProgress").hidden = !running;
+  $("exportProgress").value = job.total_bytes ? job.done_bytes / job.total_bytes : 0;
+  $("exportCancel").hidden = !running;
+  $("exportDismiss").hidden = running;
+  $("exportReveal").hidden = running || job.copied === 0;
+  $("saveAll").disabled = running;
+  $("exportSkippedBox").hidden = job.skipped.length === 0;
+  $("exportSkippedSummary").textContent = `${n(job.skipped.length)} skipped`;
+  $("exportSkipped").replaceChildren(...job.skipped.map((s) => el("li", {}, `${s.name}: ${s.reason}`)));
+}
+
+async function pollExport() {
+  try {
+    const job = await api("/api/export");
+    renderExport(job);
+    if (job.state === "running") setTimeout(pollExport, 1000);
+  } catch (e) { exportMessage("Lost track of the save: " + e.message, true); }
+}
+
+function bindExport() {
+  $("saveAll").addEventListener("click", async () => {
+    $("saveAll").disabled = true;
+    exportMessage(`Choose where to save ${state.total.toLocaleString()} video${state.total === 1 ? "" : "s"} ` +
+      "in the folder window that just opened (it may be behind this one)…");
+    $("exportDismiss").hidden = true;
+    try {
+      const job = await api("/api/export?" + queryString(1), { method: "POST" });
+      renderExport(job);
+      if (job.state === "running") pollExport();
+    } catch (e) { exportMessage(e.message, true); }
+    if ($("exportCancel").hidden) $("saveAll").disabled = false;
+  });
+  $("exportCancel").addEventListener("click", () => api("/api/export/cancel", { method: "POST" }).then(renderExport)
+    .catch((e) => exportMessage(e.message, true)));
+  $("exportReveal").addEventListener("click", () => api("/api/export/reveal", { method: "POST" })
+    .catch((e) => exportMessage(e.message, true)));
+  $("exportDismiss").addEventListener("click", () => { $("exportBox").hidden = true; $("saveAll").disabled = false; });
+  // A save keeps going if the page is reloaded; pick its progress back up.
+  api("/api/export").then((job) => { if (job.state === "running") { renderExport(job); pollExport(); } }).catch(() => {});
+}
+
 bindFilters();
 bindModal();
 bindCustomControls();
+bindExport();
 loadFacets();
 load(true).then(() => {
   // Deep link: /#v12 opens video 12 (if it's on the first page of results).

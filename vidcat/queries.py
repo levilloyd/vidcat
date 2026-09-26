@@ -54,8 +54,7 @@ def get_video(conn: sqlite3.Connection, video_id: int) -> dict | None:
     return item_from_row(row, tags_for(conn, [video_id])[video_id]) if row else None
 
 
-def search_videos(
-    conn: sqlite3.Connection,
+def _filter_clause(
     *,
     q: str = "",
     tags: Sequence[str] = (),
@@ -67,11 +66,8 @@ def search_videos(
     date_to: str | None = None,
     bad_name: bool = False,
     duplicates: bool = False,
-    sort: str = "date",
-    order: str = "desc",
-    page: int = 1,
-    page_size: int = 60,
-) -> dict:
+) -> tuple[str, list]:
+    """SQL WHERE clause (over `videos v`) and its parameters for the search filters."""
     where, params = ["v.missing = 0"], []
 
     for term in q.split():
@@ -112,17 +108,32 @@ def search_videos(
         params.append(config.BAD_NAME_THRESHOLD)
     if duplicates:
         where.append(f"{_DUP_COUNT} > 0")
+    return " AND ".join(where), params
 
-    sort_sql = SORTS.get(sort, SORTS["date"])
+
+def _order_by(sort: str, order: str) -> str:
     direction = "ASC" if order.lower() == "asc" else "DESC"
+    return f"ORDER BY {SORTS.get(sort, SORTS['date'])} {direction}, v.id {direction}"
+
+
+def search_videos(
+    conn: sqlite3.Connection,
+    *,
+    sort: str = "date",
+    order: str = "desc",
+    page: int = 1,
+    page_size: int = 60,
+    **filters,
+) -> dict:
+    """One page of the videos matching `filters` (the keyword arguments of `_filter_clause`)."""
+    clause, params = _filter_clause(**filters)
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
-    clause = " AND ".join(where)
 
     total = conn.execute(f"SELECT COUNT(*) FROM videos v WHERE {clause}", params).fetchone()[0]
     rows = conn.execute(
-        f"SELECT v.*, {_DUP_COUNT} AS dup_count FROM videos v WHERE {clause} "
-        f"ORDER BY {sort_sql} {direction}, v.id {direction} LIMIT ? OFFSET ?",
+        f"SELECT v.*, {_DUP_COUNT} AS dup_count FROM videos v WHERE {clause} {_order_by(sort, order)} "
+        "LIMIT ? OFFSET ?",
         params + [page_size, (page - 1) * page_size],
     ).fetchall()
     tag_map = tags_for(conn, [r["id"] for r in rows])
@@ -132,6 +143,12 @@ def search_videos(
         "page": page,
         "page_size": page_size,
     }
+
+
+def all_matches(conn: sqlite3.Connection, *, sort: str = "date", order: str = "desc", **filters) -> list[sqlite3.Row]:
+    """Every video matching `filters`, in display order (not just one page), for bulk actions."""
+    clause, params = _filter_clause(**filters)
+    return conn.execute(f"SELECT v.* FROM videos v WHERE {clause} {_order_by(sort, order)}", params).fetchall()
 
 
 def list_folders(conn: sqlite3.Connection) -> list[dict]:

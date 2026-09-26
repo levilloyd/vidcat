@@ -1,6 +1,7 @@
 """FastAPI app: JSON API + media/thumbnail endpoints + the static frontend."""
 import mimetypes
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -10,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import config, media, names, queries, tags, vision
+from .. import config, export, media, names, queries, tags, vision
 from ..db import connect
 from ..scanner import thumb_path
 
@@ -28,10 +29,34 @@ class TagsBody(BaseModel):
     tags: list[str]
 
 
-def create_app(db: Path | str | None = None, allow_any_host: bool = False) -> FastAPI:
+def search_filters(
+    q: str = "",
+    tag: list[str] = Query(default=[]),
+    ext: list[str] = Query(default=[]),
+    folder: str | None = None,
+    min_dur: float | None = None,
+    max_dur: float | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    bad_name: bool = False,
+    duplicates: bool = False,
+    sort: str = "date",
+    order: str = "desc",
+) -> dict:
+    """The grid's search and filter query parameters, shared by the listing and "Save all"."""
+    return dict(q=q, tags=tag, exts=ext, folder=folder, min_dur=min_dur, max_dur=max_dur, date_from=date_from,
+                date_to=date_to, bad_name=bad_name, duplicates=duplicates, sort=sort, order=order)
+
+
+def create_app(
+    db: Path | str | None = None,
+    allow_any_host: bool = False,
+    choose_folder: Callable[[str], str | None] = export.choose_folder,
+) -> FastAPI:
     db = Path(db) if db else config.db_path()
     connect(db).close()  # create schema once
     thumbs = config.thumbs_dir(db)
+    exports: dict[str, export.ExportJob | None] = {"last": None}  # one save at a time
 
     app = FastAPI(title="vidcat", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
@@ -63,30 +88,55 @@ def create_app(db: Path | str | None = None, allow_any_host: bool = False) -> Fa
 
     @app.get("/api/videos")
     def list_videos(
-        q: str = "",
-        tag: list[str] = Query(default=[]),
-        ext: list[str] = Query(default=[]),
-        folder: str | None = None,
-        min_dur: float | None = None,
-        max_dur: float | None = None,
-        date_from: str | None = None,
-        date_to: str | None = None,
-        bad_name: bool = False,
-        duplicates: bool = False,
-        sort: str = "date",
-        order: str = "desc",
-        page: int = 1,
-        page_size: int = 60,
-        conn=Depends(get_conn),
+        filters: dict = Depends(search_filters), page: int = 1, page_size: int = 60, conn=Depends(get_conn),
     ):
         try:
-            return queries.search_videos(
-                conn, q=q, tags=tag, exts=ext, folder=folder, min_dur=min_dur, max_dur=max_dur,
-                date_from=date_from, date_to=date_to, bad_name=bad_name, duplicates=duplicates,
-                sort=sort, order=order, page=page, page_size=page_size,
-            )
+            return queries.search_videos(conn, page=page, page_size=page_size, **filters)
         except ValueError as e:  # bad date format
             raise HTTPException(422, str(e)) from e
+
+    @app.post("/api/export")
+    def start_export(filters: dict = Depends(search_filters), conn=Depends(get_conn)):
+        """Ask where to save, then copy every video matching the filters there (not just the loaded page)."""
+        last = exports["last"]
+        if last and last.state == "running":
+            raise HTTPException(409, "A save is already in progress.")
+        try:
+            rows = queries.all_matches(conn, **filters)
+        except ValueError as e:  # bad date format
+            raise HTTPException(422, str(e)) from e
+        if not rows:
+            raise HTTPException(400, "No videos to save.")
+        files = [(r["path"], r["name"], r["size"]) for r in rows]
+        size = export.human_size(sum(f[2] for f in files))
+        try:
+            dest = choose_folder(f"Save {len(files)} video{'' if len(files) == 1 else 's'} ({size}) to:")
+            if not dest:
+                return {"state": "not started"}
+            exports["last"] = export.start(dest, files)
+        except export.ExportError as e:
+            raise HTTPException(409, str(e)) from e
+        return exports["last"].snapshot()
+
+    @app.get("/api/export")
+    def export_status():
+        last = exports["last"]
+        return last.snapshot() if last else {"state": "none"}
+
+    @app.post("/api/export/cancel")
+    def cancel_export():
+        last = exports["last"]
+        if last and last.state == "running":
+            last.cancel_event.set()
+        return export_status()
+
+    @app.post("/api/export/reveal")
+    def reveal_export():
+        last = exports["last"]
+        if not last:
+            raise HTTPException(404, "Nothing has been saved yet.")
+        subprocess.run(["open", str(last.dest)], check=False)
+        return {"ok": True}
 
     @app.get("/api/videos/{video_id}")
     def get_video(video_id: int, conn=Depends(get_conn)):
