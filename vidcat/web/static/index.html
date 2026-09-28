@@ -46,7 +46,13 @@
         <div id="exts" class="chips"></div>
       </section>
       <section>
-        <h2>Tags</h2>
+        <div class="section-head">
+          <h2>Tags</h2>
+          <div class="segmented" role="group" aria-label="With several tags selected, show videos that have">
+            <button id="tagModeAll" type="button" aria-pressed="true" title="Videos that have every selected tag">All</button>
+            <button id="tagModeAny" type="button" aria-pressed="false" title="Videos that have at least one selected tag">Any</button>
+          </div>
+        </div>
         <div id="tags" class="chips"></div>
       </section>
       <button id="clear" type="button" class="link">Clear all filters</button>

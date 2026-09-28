@@ -31,6 +31,17 @@ def test_list_search_sort_and_filters(client):
     assert client.get("/api/folders").json()
 
 
+def test_tag_mode_all_or_any(client):
+    items = {v["name"]: v["id"] for v in client.get("/api/videos").json()["items"]}
+    client.post(f"/api/videos/{items['Beach Trip.mp4']}/tags", json={"tags": ["2019", "isaac"]})
+    client.post(f"/api/videos/{items['MVI_0002.mp4']}/tags", json={"tags": ["2020"]})
+    total = lambda **p: client.get("/api/videos", params={"tag": ["2019", "2020"], **p}).json()["total"]
+    assert total() == 0                  # default: all
+    assert total(tag_mode="all") == 0
+    assert total(tag_mode="any") == 2
+    assert client.get("/api/videos", params={"tag": "2019", "tag_mode": "some"}).status_code == 422
+
+
 def test_tags_roundtrip(client):
     vid = client.get("/api/videos").json()["items"][0]
     r = client.post(f"/api/videos/{vid['id']}/tags", json={"tags": ["family", "Holiday"]}).json()

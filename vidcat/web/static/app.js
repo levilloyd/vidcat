@@ -14,7 +14,7 @@ function el(tag, props = {}, ...children) {
 }
 
 const state = {
-  q: "", sort: "date", order: "desc", tags: new Set(), exts: new Set(), folder: "",
+  q: "", sort: "date", order: "desc", tags: new Set(), tagMode: "all", exts: new Set(), folder: "",
   dateFrom: "", dateTo: "", minDur: "", maxDur: "", bad: false, dup: false,
   page: 1, pageSize: 60, items: [], total: 0, current: -1,
 };
@@ -61,6 +61,7 @@ function queryString(page) {
   p.set("page", page);
   p.set("page_size", state.pageSize);
   state.tags.forEach((t) => p.append("tag", t));
+  if (state.tagMode !== "all") p.set("tag_mode", state.tagMode);
   state.exts.forEach((e) => p.append("ext", e));
   if (state.folder) p.set("folder", state.folder);
   if (state.dateFrom) p.set("date_from", state.dateFrom);
@@ -156,6 +157,11 @@ function debounce(fn, ms) {
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
+function showTagMode() {
+  $("tagModeAll").setAttribute("aria-pressed", String(state.tagMode === "all"));
+  $("tagModeAny").setAttribute("aria-pressed", String(state.tagMode === "any"));
+}
+
 function bindFilters() {
   const refresh = () => load(true);
   $("q").addEventListener("input", debounce((e) => { state.q = e.target.value.trim(); refresh(); }, 250));
@@ -171,9 +177,18 @@ function bindFilters() {
     $(id).addEventListener("change", (e) => { state[key] = e.target.value; refresh(); });
   }
   $("folder").addEventListener("change", (e) => { state.folder = e.target.value; refresh(); });
+  for (const mode of ["all", "any"]) {
+    $(mode === "all" ? "tagModeAll" : "tagModeAny").addEventListener("click", () => {
+      if (state.tagMode === mode) return;
+      state.tagMode = mode;
+      showTagMode();
+      if (state.tags.size > 1) refresh(); // with 0 or 1 tags selected, All and Any give the same results
+    });
+  }
   $("more").addEventListener("click", () => load(false));
   $("clear").addEventListener("click", () => {
-    Object.assign(state, { q: "", tags: new Set(), exts: new Set(), folder: "", dateFrom: "", dateTo: "", minDur: "", maxDur: "", bad: false, dup: false });
+    Object.assign(state, { q: "", tags: new Set(), tagMode: "all", exts: new Set(), folder: "", dateFrom: "", dateTo: "", minDur: "", maxDur: "", bad: false, dup: false });
+    showTagMode();
     $("q").value = ""; $("bad").checked = false; $("dup").checked = false;
     for (const id of ["dateFrom", "dateTo", "minDur", "maxDur"]) $(id).value = "";
     loadFacets(); load(true);
