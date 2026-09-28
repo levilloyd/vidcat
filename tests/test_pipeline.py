@@ -225,3 +225,26 @@ def test_search_filters_and_sorts(conn, library, thumbs):
     by_name = [v["name"] for v in queries.search_videos(conn, sort="name", order="asc")["items"]]
     assert by_name == sorted(by_name, key=str.lower)
     assert len(queries.search_videos(conn, page_size=2)["items"]) == 2
+
+
+def test_several_tags_match_all_or_any(conn, library, thumbs):
+    do_scan(conn, library, thumbs)
+    ids = {r["name"]: r["id"] for r in conn.execute("SELECT id, name FROM videos")}
+    tags.add_tags(conn, ids["Beach Trip.mp4"], ["2019", "isaac"])
+    tags.add_tags(conn, ids["IMG_0001.mp4"], ["2019"])
+    tags.add_tags(conn, ids["MVI_0002.mp4"], ["2020", "isaac"])
+
+    def names(**kw):
+        return sorted(v["name"] for v in queries.search_videos(conn, **kw)["items"])
+
+    assert names(tags=["2019", "isaac"]) == ["Beach Trip.mp4"]  # default: every selected tag
+    assert names(tags=["2019", "isaac"], tag_mode="all") == ["Beach Trip.mp4"]
+    assert names(tags=["2019", "2020"], tag_mode="all") == []
+    assert names(tags=["2019", "2020"], tag_mode="any") == ["Beach Trip.mp4", "IMG_0001.mp4", "MVI_0002.mp4"]
+    assert names(tags=["2019", "isaac"], tag_mode="any") == ["Beach Trip.mp4", "IMG_0001.mp4", "MVI_0002.mp4"]
+    assert names(tags=["ISAAC"], tag_mode="any") == ["Beach Trip.mp4", "MVI_0002.mp4"]  # tags ignore case
+    assert queries.search_videos(conn, tags=[], tag_mode="any")["total"] == 3  # no tags: no tag filter
+    assert [r["name"] for r in queries.all_matches(conn, tags=["2020", "isaac"], tag_mode="any", sort="name",
+                                                   order="asc")] == ["Beach Trip.mp4", "MVI_0002.mp4"]
+    with pytest.raises(ValueError):
+        queries.search_videos(conn, tags=["2019"], tag_mode="either")

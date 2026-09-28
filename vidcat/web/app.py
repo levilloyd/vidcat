@@ -32,6 +32,7 @@ class TagsBody(BaseModel):
 def search_filters(
     q: str = "",
     tag: list[str] = Query(default=[]),
+    tag_mode: Literal["all", "any"] = "all",  # with several tags: videos with every one, or with at least one
     ext: list[str] = Query(default=[]),
     folder: str | None = None,
     min_dur: float | None = None,
@@ -44,8 +45,9 @@ def search_filters(
     order: str = "desc",
 ) -> dict:
     """The grid's search and filter query parameters, shared by the listing and "Save all"."""
-    return dict(q=q, tags=tag, exts=ext, folder=folder, min_dur=min_dur, max_dur=max_dur, date_from=date_from,
-                date_to=date_to, bad_name=bad_name, duplicates=duplicates, sort=sort, order=order)
+    return dict(q=q, tags=tag, tag_mode=tag_mode, exts=ext, folder=folder, min_dur=min_dur, max_dur=max_dur,
+                date_from=date_from, date_to=date_to, bad_name=bad_name, duplicates=duplicates, sort=sort,
+                order=order)
 
 
 def create_app(

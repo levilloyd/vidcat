@@ -56,6 +56,11 @@ button:disabled { opacity: .5; cursor: default; }
 aside { display: flex; flex-direction: column; gap: 16px; align-self: start; position: sticky; top: 72px; max-height: calc(100vh - 88px); overflow: auto; }
 aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
 aside select { width: 100%; }
+.section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.section-head h2 { margin: 0; }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.segmented button { background: none; color: var(--muted); border-radius: 0; padding: 1px 9px; font-size: 12px; }
+.segmented button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }
 .row { display: flex; gap: 8px; align-items: center; }
 .row > input { flex: 1; }
 .row span { color: var(--muted); }

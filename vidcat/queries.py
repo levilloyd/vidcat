@@ -58,6 +58,7 @@ def _filter_clause(
     *,
     q: str = "",
     tags: Sequence[str] = (),
+    tag_mode: str = "all",
     exts: Sequence[str] = (),
     folder: str | None = None,
     min_dur: float | None = None,
@@ -67,7 +68,13 @@ def _filter_clause(
     bad_name: bool = False,
     duplicates: bool = False,
 ) -> tuple[str, list]:
-    """SQL WHERE clause (over `videos v`) and its parameters for the search filters."""
+    """SQL WHERE clause (over `videos v`) and its parameters for the search filters.
+
+    With several `tags`, `tag_mode` "all" keeps videos that have every one of them and "any" keeps videos
+    that have at least one.
+    """
+    if tag_mode not in ("all", "any"):
+        raise ValueError(f"tag_mode must be 'all' or 'any', not {tag_mode!r}")
     where, params = ["v.missing = 0"], []
 
     for term in q.split():
@@ -78,12 +85,13 @@ def _filter_clause(
             "WHERE vt.video_id = v.id AND t.name LIKE ? ESCAPE '\\'))"
         )
         params += [like, like, like, like]
-    for tag in tags:
+    tag_groups = [[t] for t in tags] if tag_mode == "all" else [list(tags)] if tags else []
+    for group in tag_groups:
         where.append(
             "EXISTS (SELECT 1 FROM video_tags vt JOIN tags t ON t.id = vt.tag_id "
-            "WHERE vt.video_id = v.id AND t.name = ?)"
+            f"WHERE vt.video_id = v.id AND t.name IN ({','.join('?' * len(group))}))"
         )
-        params.append(tag)
+        params += group
     if exts:
         where.append(f"v.ext IN ({','.join('?' * len(exts))})")
         params += [e.lower().lstrip(".") for e in exts]
