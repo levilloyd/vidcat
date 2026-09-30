@@ -12,6 +12,7 @@ from . import config
 GENERIC_TOKENS = {
     "video", "videos", "vid", "img", "image", "images", "mov", "movie", "movies", "clip", "clips",
     "dsc", "dscn", "dscf", "mvi", "mah", "gopr", "gopro", "pxl", "sam", "hvc", "vts",
+    "pict", "cimg", "hpim", "imag", "sany", "sdc", "mvc", "dji",
     "untitled", "new", "copy", "final", "export", "exported", "output", "recording", "record",
     "capture", "screen", "screenshot", "file", "footage", "sample", "test", "temp", "tmp",
     "camera", "cam", "camcorder", "mp4", "mts", "avi", "mpg", "mpeg", "wmv", "mkv", "m4v", "m2ts",

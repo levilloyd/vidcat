@@ -125,6 +125,11 @@ def _sync(
             if row["missing"]:
                 conn.execute("UPDATE videos SET missing = 0 WHERE id = ?", (row["id"],))
             conn.execute("UPDATE videos SET scanned_at = ? WHERE id = ?", (now, row["id"]))
+            # Re-score in case the scoring rules changed since this file was cataloged. 100 is left alone,
+            # since that's what "keep name forever" sets.
+            score = name_quality(os.path.splitext(row["name"])[0])
+            if row["name_score"] < 100 and score != row["name_score"]:
+                conn.execute("UPDATE videos SET name_score = ? WHERE id = ?", (score, row["id"]))
         else:
             todo.append((path, size, mtime, row))
     conn.commit()

@@ -25,6 +25,18 @@ def test_scan_reads_metadata_and_is_incremental(conn, library, thumbs):
     assert (s2.added, s2.updated, s2.unchanged) == (0, 0, 3)
 
 
+def test_rescan_rescores_names_but_keeps_kept_ones(conn, library, thumbs):
+    do_scan(conn, library, thumbs)
+    # Pretend both were scored as fine by older rules; one of them the user chose to keep forever.
+    conn.execute("UPDATE videos SET name_score = 60 WHERE name = 'IMG_0001.mp4'")
+    conn.execute("UPDATE videos SET name_score = 100 WHERE name = 'MVI_0002.mp4'")
+    conn.commit()
+    do_scan(conn, library, thumbs)
+    score = lambda n: conn.execute("SELECT name_score FROM videos WHERE name = ?", (n,)).fetchone()[0]
+    assert score("IMG_0001.mp4") < 50
+    assert score("MVI_0002.mp4") == 100
+
+
 def test_scan_marks_missing_and_detects_moves(conn, library, thumbs):
     do_scan(conn, library, thumbs)
     target = conn.execute("SELECT id FROM videos WHERE name = 'MVI_0002.mp4'").fetchone()["id"]

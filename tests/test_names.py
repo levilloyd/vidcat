@@ -11,6 +11,7 @@ from vidcat.names import name_quality, sanitize_stem
     "20190704_123456", "2019-07-04", "123456", "Untitled", "video", "Video 12", "IMG_1234 copy",
     "WhatsApp Video 2019-07-04 at 12.30.15", "Screen Recording 2020-01-01 at 10.00.00",
     "3f2a9c1e8b7d4a6f9e0c1b2a3d4e5f60", "a3f9bc12-4d5e-4f60-8a1b-2c3d4e5f6a7b", "MOV0123",
+    "PICT0885", "CIMG1234", "HPIM0042", "SANY0001", "SDC10001", "MVC-001F", "DJI_0001",
 ])
 def test_bad_names(stem):
     assert name_quality(stem) < 50, stem
