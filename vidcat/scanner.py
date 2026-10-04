@@ -120,7 +120,7 @@ def _sync(
             if row is not None:
                 by_folded[path.casefold()].remove(row)
         if (row and row["path"] == path and row["size"] == size and abs(row["mtime"] - mtime) < 1e-6
-                and row["date_source"] is not None):
+                and row["date_source"] is not None and row["location_read"]):
             stats.unchanged += 1
             if row["missing"]:
                 conn.execute("UPDATE videos SET missing = 0 WHERE id = ?", (row["id"],))
@@ -134,14 +134,20 @@ def _sync(
             todo.append((path, size, mtime, row))
     conn.commit()
 
+    def read(job):
+        data = media.probe(job[0])
+        return data, media.gopro_location(job[0], data)
+
     # Probe new/changed files in parallel; write to the DB from this thread only.
     new_rows, thumb_jobs = [], []
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = pool.map(lambda t: media.probe(t[0]), todo)
-        for i, ((path, size, mtime, row), data) in enumerate(zip(todo, results), 1):
+        results = pool.map(read, todo)
+        for i, ((path, size, mtime, row), (data, gopro)) in enumerate(zip(todo, results), 1):
             report("Reading metadata", i, len(todo))
             name = os.path.basename(path)
             info = media.parse_probe(data, name, mtime)
+            if info["latitude"] is None and gopro:
+                info["latitude"], info["longitude"] = gopro
             if info["has_video"] is False:  # ffprobe worked and found no video stream
                 stats.skipped += 1
                 continue
@@ -150,7 +156,7 @@ def _sync(
                 ext=os.path.splitext(name)[1].lower().lstrip("."), size=size, mtime=mtime,
                 created_at=info["created_at"], date_source=info["date_source"], duration=info["duration"],
                 width=info["width"], height=info["height"], codec=info["codec"],
-                name_score=name_quality(os.path.splitext(name)[0]), scanned_at=now,
+                latitude=info["latitude"], longitude=info["longitude"], name_score=name_quality(os.path.splitext(name)[0]), scanned_at=now,
             )
             if row:
                 # A row is re-read either because the file changed or because an older catalog lacked
@@ -162,7 +168,8 @@ def _sync(
                 conn.execute(
                     "UPDATE videos SET path=:path, dir=:dir, name=:name, ext=:ext, size=:size, mtime=:mtime, "
                     "created_at=:created_at, date_source=:date_source, duration=:duration, width=:width, "
-                    "height=:height, codec=:codec, missing=0, scanned_at=:scanned_at"
+                    "height=:height, codec=:codec, latitude=:latitude, longitude=:longitude, location_read=1, missing=0, "
+                    "scanned_at=:scanned_at"
                     + (", name_score=:name_score" if content_changed or row["name"].casefold() != name.casefold() else "")
                     + reset + " WHERE id=:id",
                     {**values, "id": row["id"]},
@@ -174,9 +181,9 @@ def _sync(
             else:
                 cur = conn.execute(
                     "INSERT INTO videos (path, dir, name, ext, size, mtime, created_at, date_source, duration, "
-                    "width, height, codec, name_score, added_at, scanned_at) VALUES (:path, :dir, :name, "
-                    ":ext, :size, :mtime, :created_at, :date_source, :duration, :width, :height, :codec, "
-                    ":name_score, :scanned_at, :scanned_at)",
+                    "width, height, codec, latitude, longitude, location_read, name_score, added_at, scanned_at) "
+                    "VALUES (:path, :dir, :name, :ext, :size, :mtime, :created_at, :date_source, :duration, :width, "
+                    ":height, :codec, :latitude, :longitude, 1, :name_score, :scanned_at, :scanned_at)",
                     values,
                 )
                 video_id = cur.lastrowid

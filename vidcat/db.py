@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS videos (
     name_score   INTEGER NOT NULL DEFAULT 100,
     caption      TEXT,
     rotation     INTEGER NOT NULL DEFAULT 0,  -- extra clockwise turn applied when viewing: 0, 90, 180 or 270
+    latitude     REAL,                     -- where it was filmed (GPS from the file's metadata), if recorded
+    longitude    REAL,
+    location_read INTEGER NOT NULL DEFAULT 0,  -- 1 once latitude/longitude have been looked for
     missing      INTEGER NOT NULL DEFAULT 0,
     added_at     INTEGER NOT NULL,
     scanned_at   INTEGER NOT NULL
@@ -41,6 +44,14 @@ CREATE TABLE IF NOT EXISTS video_tags (
     PRIMARY KEY (video_id, tag_id)
 );
 CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_id);
+
+-- Place names looked up for GPS coordinates (see places.py), keyed by lat/lon * 1000 rounded; '' = nothing there.
+CREATE TABLE IF NOT EXISTS places (
+    lat_key INTEGER NOT NULL,
+    lon_key INTEGER NOT NULL,
+    name    TEXT NOT NULL,
+    PRIMARY KEY (lat_key, lon_key)
+);
 
 CREATE TABLE IF NOT EXISTS rename_history (
     id       INTEGER PRIMARY KEY,
@@ -83,4 +94,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE videos ADD COLUMN date_source TEXT")
     if "rotation" not in cols:
         conn.execute("ALTER TABLE videos ADD COLUMN rotation INTEGER NOT NULL DEFAULT 0")
+    if "location_read" not in cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN latitude REAL")
+        conn.execute("ALTER TABLE videos ADD COLUMN longitude REAL")
+        conn.execute("ALTER TABLE videos ADD COLUMN location_read INTEGER NOT NULL DEFAULT 0")
+        # Only MP4/QuickTime-family files can hold a location; the next `vidcat scan` re-reads just those.
+        conn.execute("UPDATE videos SET location_read = 1 WHERE ext NOT IN ('mov', 'mp4', 'm4v', '3gp')")
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 1:
+        # GoPro telemetry GPS came after the first location release: look again at files that found none.
+        conn.execute("UPDATE videos SET location_read = 0 WHERE latitude IS NULL AND ext IN ('mov', 'mp4')")
+        conn.execute("PRAGMA user_version = 1")
     conn.commit()

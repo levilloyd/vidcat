@@ -35,6 +35,7 @@ const fmtDur = (s) => {
 };
 const fmtDate = (ts) => new Date(ts * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 const fmtDateTime = (ts) => new Date(ts * 1000).toLocaleString();
+const fmtCoord = (deg, pos, neg) => `${Math.abs(deg).toFixed(4)}° ${deg < 0 ? neg : pos}`;
 const stem = (name) => name.replace(/\.[^.]+$/, "");
 
 async function api(path, options = {}) {
@@ -242,14 +243,36 @@ function openModal(index) {
     ["Size", fmtSize(v.size)],
     ["Resolution", v.width ? `${v.width}×${v.height}` : "unknown"],
     ["Codec", v.codec || "unknown"],
-    ["Location", v.dir],
+    ["Folder", v.dir],
   ];
+  if (v.latitude != null) {
+    const ll = `${v.latitude},${v.longitude}`;
+    // Only a link: nothing is sent to a map service unless it's clicked.
+    const place = el("span", { id: "place" });
+    rows.push(["Filmed at", el("span", {}, place, el("br"),
+      el("small", {}, `${fmtCoord(v.latitude, "N", "S")}, ${fmtCoord(v.longitude, "E", "W")} · `,
+        el("a", { href: `https://maps.apple.com/?ll=${ll}&q=${ll}`, target: "_blank", rel: "noopener" }, "Show on map")))]);
+    showPlace(v, place);
+  }
   if (v.caption) rows.push(["Description", v.caption]);
   if (v.dup_count) rows.push(["Duplicates", `${v.dup_count} other file(s) with the same size — run \`vidcat dupes\` to review`]);
   for (const [k, val] of rows) meta.append(el("dt", {}, k), el("dd", {}, val));
   $("prev").disabled = index <= 0;
   $("next").disabled = index >= state.items.length - 1;
   if (!modal.open) modal.showModal();
+}
+
+// Place names are looked up online the first time, so the row fills in when the answer arrives. If the lookup
+// fails (offline, say) the coordinates are still shown.
+async function showPlace(v, node) {
+  node.textContent = "Looking up place…";
+  node.classList.add("muted");
+  let place = null;
+  try { place = (await api(`/api/videos/${v.id}/place`)).place; } catch { /* keep just the coordinates */ }
+  if (!node.isConnected) return; // moved on to another video meanwhile
+  node.textContent = place || "";
+  node.classList.remove("muted");
+  node.nextSibling.hidden = !place; // the line break
 }
 
 function renderModalTags(v) {

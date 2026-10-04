@@ -51,6 +51,16 @@ def test_convert_produces_verified_h264_aac_mp4(old_lib):
     assert progress and progress[-1] == pytest.approx(1.0, abs=0.1)
 
 
+def test_iphone_location_is_carried_into_the_mp4(tmp_path):
+    src = tmp_path / "IMG_0001.mov"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=25:duration=1",
+                    "-c:v", "mjpeg", "-movflags", "use_metadata_tags",
+                    "-metadata", "com.apple.quicktime.location.ISO6709=+37.6498-121.7799+153.234/", str(src)], check=True)
+    dst, _ = transcode.convert(src, FAST)
+    info = media.parse_probe(media.probe(dst), dst.name, 0)
+    assert (info["latitude"], info["longitude"]) == (37.6498, -121.7799)
+
+
 def test_wmv_converts_too(old_lib):
     dst, encoded = transcode.convert(old_lib / "kids.wmv", FAST)
     s, _, fmt = streams(dst)

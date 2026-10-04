@@ -35,7 +35,7 @@ def _local_epoch(d: str, end_of_day: bool = False) -> int:
 def item_from_row(row: sqlite3.Row, tags: list[str]) -> dict:
     d = {k: row[k] for k in (
         "id", "path", "dir", "name", "ext", "size", "created_at", "date_source", "duration", "width", "height",
-        "codec", "name_score", "caption", "rotation",
+        "codec", "name_score", "caption", "rotation", "latitude", "longitude",
     )}
     # Changes whenever the file behind this id does: new content, or a new file given a deleted row's id
     # (SQLite reuses the highest id). The UI puts it in media/thumbnail URLs so browsers never show a cached

@@ -148,3 +148,75 @@ def test_keep_name_forever_survives_a_metadata_refresh(conn, tmp_path, clip_dir,
     conn.commit()
     scanner.scan(conn, [lib], thumbs)
     assert conn.execute("SELECT name_score FROM videos").fetchone()[0] == 100
+
+
+@pytest.mark.parametrize("value, expected", [
+    ("+37.6498-121.7799+153.234/", (37.6498, -121.7799)),   # iPhone, with altitude
+    ("+51.5007-000.1246/", (51.5007, -0.1246)),             # Android / ffmpeg, no altitude
+    ("-33.8568+151.2153/", (-33.8568, 151.2153)),
+    ("+00.0000+000.0000/", None),                           # camera with no GPS fix
+    ("+95.0000+010.0000/", None),
+    ("", None),
+    ("somewhere", None),
+])
+def test_parse_iso6709(value, expected):
+    assert media.parse_iso6709(value) == expected
+
+
+def test_location_from_probe():
+    mtime = datetime(2004, 9, 15).timestamp()
+    iphone = {"format": {"tags": {"com.apple.quicktime.location.ISO6709": "+37.6498-121.7799+153.234/"}},
+              "streams": [{"codec_type": "video"}]}
+    android = {"format": {"tags": {"location": "+51.5007-000.1246/"}}, "streams": [{"codec_type": "video"}]}
+    empty = {"format": {"tags": {"com.apple.quicktime.location.ISO6709": ""}}, "streams": [{"codec_type": "video"}]}
+    info = media.parse_probe(iphone, "IMG_1.MOV", mtime)
+    assert (info["latitude"], info["longitude"]) == (37.6498, -121.7799)
+    assert media.parse_probe(android, "x.mp4", mtime)["latitude"] == 51.5007
+    assert media.parse_probe(empty, "x.mov", mtime)["latitude"] is None
+    assert media.parse_probe(None, "x.mov", mtime)["latitude"] is None
+
+
+def test_scan_records_location_and_old_catalogs_pick_it_up(tmp_path, thumbs):
+    import subprocess
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=10:duration=1",
+                    "-metadata", "location=+37.6498-121.7799/", "-pix_fmt", "yuv420p", str(lib / "geo.mp4")], check=True)
+    path = tmp_path / "old.db"
+    conn = db.connect(path)
+    scanner.scan(conn, [lib], thumbs)
+    row = conn.execute("SELECT * FROM videos").fetchone()
+    assert (row["latitude"], row["longitude"], row["location_read"]) == (37.6498, -121.7799, 1)
+
+    # A catalog from before locations were recorded: the columns are added and the next scan fills them in.
+    conn.execute("UPDATE videos SET sha256 = 'abc'")
+    conn.commit()
+    for col in ("latitude", "longitude", "location_read"):
+        conn.execute(f"ALTER TABLE videos DROP COLUMN {col}")
+    conn.commit()
+    conn.close()
+    conn = db.connect(path)
+    assert conn.execute("SELECT latitude, location_read FROM videos").fetchone()[:] == (None, 0)
+    s = scanner.scan(conn, [lib], thumbs)
+    assert (s.updated, s.added) == (1, 0)
+    row = conn.execute("SELECT * FROM videos").fetchone()
+    assert (row["latitude"], row["longitude"], row["sha256"]) == (37.6498, -121.7799, "abc")
+    assert scanner.scan(conn, [lib], thumbs).unchanged == 1
+
+
+def test_formats_without_location_are_not_reread_after_migration(tmp_path):
+    path = tmp_path / "old.db"
+    conn = db.connect(path)
+    for name in ("a.avi", "b.mov"):
+        conn.execute(
+            "INSERT INTO videos (path, dir, name, ext, size, mtime, created_at, added_at, scanned_at) "
+            f"VALUES ('/x/{name}', '/x', '{name}', '{name[2:]}', 1, 1, 1, 1, 1)"
+        )
+    conn.commit()
+    conn.execute("ALTER TABLE videos DROP COLUMN location_read")
+    conn.execute("ALTER TABLE videos DROP COLUMN latitude")
+    conn.execute("ALTER TABLE videos DROP COLUMN longitude")
+    conn.commit()
+    conn.close()
+    got = dict(db.connect(path).execute("SELECT ext, location_read FROM videos").fetchall())
+    assert got == {"avi": 1, "mov": 0}

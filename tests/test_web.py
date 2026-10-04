@@ -83,6 +83,35 @@ def test_rotation_is_saved_validated_and_leaves_the_file_alone(client, library):
     assert r["rotation"] == 270 and r["caption"] == "hello"
 
 
+def test_location_is_in_the_api(client):
+    items = client.get("/api/videos").json()["items"]
+    assert all(v["latitude"] is None and v["longitude"] is None for v in items)  # test clips have no GPS
+
+
+def test_place_endpoint(client, tmp_path, monkeypatch):
+    from vidcat import places
+    items = client.get("/api/videos").json()["items"]
+    with_gps, without = items[0]["id"], items[1]["id"]
+    conn = connect(tmp_path / "web.db")
+    conn.execute("UPDATE videos SET latitude = 36.9517, longitude = -122.0258 WHERE id = ?", (with_gps,))
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(places, "_lookup", lambda lat, lon, lang: f"Santa Cruz ({lang})")
+    r = client.get(f"/api/videos/{with_gps}/place", headers={"Accept-Language": "en-GB"})
+    assert r.json() == {"place": "Santa Cruz (en-GB)"}
+    assert client.get(f"/api/videos/{without}/place").json() == {"place": None}
+
+    def offline(*a):
+        raise places.PlaceUnavailable("offline")
+    monkeypatch.setattr(places, "_lookup", offline)
+    assert client.get(f"/api/videos/{with_gps}/place").json() == {"place": "Santa Cruz (en-GB)"}  # cached
+    conn = connect(tmp_path / "web.db")
+    conn.execute("DELETE FROM places")
+    conn.commit()
+    conn.close()
+    assert client.get(f"/api/videos/{with_gps}/place").status_code == 503
+
+
 def test_suggest_name_without_ai(client):
     vid = next(v for v in client.get("/api/videos").json()["items"] if v["date_source"] == "metadata")
     r = client.post(f"/api/videos/{vid['id']}/suggest-name").json()

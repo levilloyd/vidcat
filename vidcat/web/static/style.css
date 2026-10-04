@@ -147,6 +147,8 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
 dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
 dt { color: var(--muted); }
 dd { margin: 0; overflow-wrap: anywhere; }
+dd a { color: var(--accent); }
+dd small, .muted { color: var(--muted); }
 .nav { margin-top: auto; }
 
 @media (max-width: 800px) {

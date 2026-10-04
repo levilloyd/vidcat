@@ -100,7 +100,14 @@ abandoned with an error instead of hanging.
 Search names/paths/tags/descriptions; sort by date, name, size, length; filter by tag, format, folder, date range,
 length, "needs a better name", and "possible duplicates". Click a video to play it, edit its tags, or rename it
 (with the same suggestions, including AI). Browsers can't play every format (AVI, MTS, WMV…); for those use
-"Show in Finder" or Download (or convert them with `vidcat transcode`). The server only listens on localhost and
+"Show in Finder" or Download (or convert them with `vidcat transcode`). Videos whose file records where they were
+filmed show the place name (most phones record this, as do GoPros with GPS on, in their telemetry track; only its
+first minute is read, since reading all of it means reading the whole file), e.g. "Lighthouse Field, Santa Cruz, California, United
+States", with the coordinates and a "Show on map" link. The name is looked up from OpenStreetMap
+([Nominatim](https://nominatim.org)) the first time such a video is opened, which sends it the coordinates (nothing
+else); answers are kept in the catalog, so each spot (to about 100 m) is looked up only once. Offline, just the
+coordinates are shown. Catalogs from before this feature pick up locations on the next `vidcat scan`, which
+re-reads only MP4/MOV/M4V/3GP files once. The server only listens on localhost and
 rejects foreign Host/Origin headers, because it can rename files and has no login.
 
 **Saving a set of videos.** "Save all…" copies every video in the current results (all of them, not just the ones

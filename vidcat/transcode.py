@@ -65,9 +65,10 @@ def detect_interlaced(src: Path | str, frames: int = 300) -> bool:
 
 def build_command(
     src: Path, dst: Path, settings: Settings, deinterlace: bool, creation_time: int | None,
-    copy_video: bool = False, copy_audio: bool = False,
+    copy_video: bool = False, copy_audio: bool = False, location: str | None = None,
 ) -> list[str]:
-    """ffmpeg command line. `copy_video` / `copy_audio` copy that part untouched (lossless) instead of encoding it."""
+    """ffmpeg command line. `copy_video` / `copy_audio` copy that part untouched (lossless) instead of encoding it.
+    `location` is an ISO 6709 string to record as where the video was filmed."""
     encoder, default_crf, extra = CODECS[settings.codec]
     filters = ["yadif=mode=0:parity=-1:deint=0"] if deinterlace else []
     # yuv420p needs even dimensions; out_range=tv makes full-range sources (e.g. MJPEG) standard limited-range
@@ -88,6 +89,8 @@ def build_command(
     if creation_time:
         stamp = datetime.fromtimestamp(creation_time, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
         cmd += ["-metadata", f"creation_time={stamp}"]
+    if location:  # -map_metadata doesn't carry an iPhone's QuickTime location key into an MP4
+        cmd += ["-metadata", f"location={location}"]
     return cmd + ["-progress", "pipe:1", "-nostats", str(dst)]
 
 
@@ -179,7 +182,7 @@ def convert(
     `encoded` is False when a matching .mp4 already exists (e.g. from an earlier run) and looks like a
     correct conversion; it is then reused as-is. The output is written to a hidden temp file, verified,
     and only then moved into place, so a failed or interrupted run never leaves a half-written .mp4.
-    The original is never touched. `creation_time` is stored in the output's metadata, and the output's
+    The original is never touched. `creation_time` and any recorded location are stored in the output's metadata, and the output's
     modified time is set to the original's. A .mov/.m4v that browsers can already play raises
     `AlreadyPlayable` (re-encoding it would only lose quality) unless `include_playable` is set.
     """
@@ -216,7 +219,9 @@ def convert(
                       and not deinterlace and settings.codec == "h264")
         copy_audio = copy_video and all(
             s.get("codec_name") in BROWSER_AUDIO for s in src_data.get("streams", []) if s.get("codec_type") == "audio")
-        encode(build_command(src, tmp, settings, deinterlace, creation_time, copy_video, copy_audio), duration, on_progress)
+        cmd = build_command(src, tmp, settings, deinterlace, creation_time, copy_video, copy_audio,
+                            location=media.location_tag(src_data))
+        encode(cmd, duration, on_progress)
         problem = verify_output(tmp, duration, need_audio)
         if problem:
             raise TranscodeError(f"verification failed: {problem}")

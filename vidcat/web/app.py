@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import config, export, media, names, queries, tags, vision
+from .. import config, export, media, names, places, queries, tags, vision
 from ..db import connect
 from ..scanner import thumb_path
 
@@ -184,6 +184,18 @@ def create_app(
             except (vision.VisionUnavailable, media.MediaToolError) as e:
                 warning = str(e)
         return {"suggestion": names.suggest_name(item, caption), "caption": caption, "warning": warning}
+
+    @app.get("/api/videos/{video_id}/place")
+    def get_place(video_id: int, request: Request, conn=Depends(get_conn)):
+        """Name of the place where the video was filmed, from its GPS position (looked up online once, then cached)."""
+        item = video_or_404(conn, video_id)
+        if item["latitude"] is None:
+            return {"place": None}
+        try:
+            name = places.place_name(conn, item["latitude"], item["longitude"], request.headers.get("accept-language"))
+        except places.PlaceUnavailable as e:
+            raise HTTPException(503, str(e)) from e
+        return {"place": name}
 
     @app.post("/api/videos/{video_id}/reveal")
     def reveal(video_id: int, conn=Depends(get_conn)):
