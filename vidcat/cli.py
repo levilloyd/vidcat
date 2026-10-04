@@ -1,4 +1,4 @@
-"""Command-line interface: scan, dupes, names, places, tag, ls, serve."""
+"""Command-line interface: scan, dupes, names, places, archive, tag, ls, serve."""
 import os
 import subprocess
 import sys
@@ -17,7 +17,7 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from . import (
-    config, disposal, duplicates, media, names as names_mod, places as places_mod, queries, scanner, tags as tags_mod,
+    archive as archive_mod, config, disposal, duplicates, media, names as names_mod, places as places_mod, queries, scanner, tags as tags_mod,
     transcode as transcode_mod, vision,
 )
 from .db import connect
@@ -25,6 +25,12 @@ from .db import connect
 app = typer.Typer(help="Manage a home video archive: scan, dedupe, rename, tag, browse.", no_args_is_help=True)
 tag_app = typer.Typer(help="Add, remove and list tags.", no_args_is_help=True)
 app.add_typer(tag_app, name="tag")
+archive_app = typer.Typer(
+    help="Archive folders: kept as they are; their copies of videos found elsewhere are hidden in the web viewer "
+         "and never offered for removal by `vidcat dupes`.",
+    no_args_is_help=True,
+)
+app.add_typer(archive_app, name="archive")
 console = Console()
 
 
@@ -102,6 +108,7 @@ def scan(
                 conn, roots, config.thumbs_dir(ctx.obj), workers=workers,
                 make_thumbs=not no_thumbs, on_progress=callback,
             )
+            archive_mod.fingerprint(conn, callback)  # so copies in archive folders can be recognized
     except media.MediaToolError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
@@ -125,6 +132,9 @@ def dupes(
     progress, callback = progress_reporter()
     with progress:
         groups = duplicates.find_duplicate_groups(conn, callback)
+    archived = archive_mod.folders(conn)
+    if archived:
+        console.print(f"[dim]Archive folders ({len(archived)}) are left alone; nothing in them is offered for removal.[/dim]")
     if not groups:
         console.print("[green]No duplicate videos found.[/green]")
         return
@@ -440,6 +450,42 @@ def places(
     console.print(f"[green]Done.[/green] {found} place name{'' if found == 1 else 's'} saved"
                   f"{f', {nothing} with nothing there (open water)' if nothing else ''}"
                   f"{f'; {left} still to look up, run it again later' if left else ''}.")
+
+
+# --------------------------------------------------------------------------- archive
+
+@archive_app.command("add")
+def archive_add(ctx: typer.Context, folders: Annotated[list[Path], typer.Argument(help="Folders to treat as archives.")]):
+    """Treat folders as archives (their videos still need `vidcat scan` to be cataloged)."""
+    conn = open_db(ctx)
+    for f in folders:
+        try:
+            console.print(f"Archive folder: {archive_mod.add(conn, f)}")
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+    progress, callback = progress_reporter()
+    with progress:
+        archive_mod.fingerprint(conn, callback)
+
+
+@archive_app.command("remove")
+def archive_remove(ctx: typer.Context, folders: Annotated[list[Path], typer.Argument(help="Archive folders to stop treating as archives.")]):
+    """Stop treating folders as archives (nothing on disk or in the catalog is removed)."""
+    conn = open_db(ctx)
+    for f in folders:
+        console.print(f"No longer an archive: {f}" if archive_mod.remove(conn, f) else f"[yellow]Not an archive folder: {f}[/yellow]")
+
+
+@archive_app.command("list")
+def archive_list(ctx: typer.Context):
+    """Show the archive folders."""
+    conn = open_db(ctx)
+    archived = archive_mod.folders(conn)
+    if not archived:
+        console.print("No archive folders. Add one with: vidcat archive add FOLDER")
+    for f in archived:
+        n = conn.execute(f"SELECT COUNT(*) FROM videos v WHERE missing = 0 AND {archive_mod.in_archive_sql([f])}").fetchone()[0]
+        console.print(f"{f}  [dim]({n} cataloged)[/dim]")
 
 
 # --------------------------------------------------------------------------- transcode

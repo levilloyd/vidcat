@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS places (
     PRIMARY KEY (lat_key, lon_key)
 );
 
+-- Folders kept as they are whose copies of videos found elsewhere are hidden and never removed (see archive.py).
+CREATE TABLE IF NOT EXISTS archive_folders (
+    path TEXT PRIMARY KEY
+);
+
 CREATE TABLE IF NOT EXISTS rename_history (
     id       INTEGER PRIMARY KEY,
     video_id INTEGER NOT NULL,

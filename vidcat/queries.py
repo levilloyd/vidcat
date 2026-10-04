@@ -4,7 +4,7 @@ import time
 from collections.abc import Sequence
 from datetime import date, timedelta
 
-from . import config
+from . import archive as archive_mod, config
 from .places import PLACE_SQL
 from .tags import tags_for
 
@@ -17,11 +17,14 @@ SORTS = {
     "path": "v.path COLLATE NOCASE",
 }
 
-# Other visible files that could be a copy of this one: same size, and not proven different by hash.
-_DUP_COUNT = (
-    "(SELECT COUNT(*) FROM videos d WHERE d.size = v.size AND d.id != v.id AND d.missing = 0 "
-    "AND v.size > 0 AND (v.sha256 IS NULL OR d.sha256 IS NULL OR d.sha256 = v.sha256))"
-)
+
+def _dup_count_sql(archive: list[str]) -> str:
+    """Other visible files that could be a copy of `v`: same size, and not proven different by hash. Copies in
+    archive folders don't count, and archive videos get 0: `vidcat dupes` never removes anything from them."""
+    count = ("(SELECT COUNT(*) FROM videos d WHERE d.size = v.size AND d.id != v.id AND d.missing = 0 "
+             "AND v.size > 0 AND (v.sha256 IS NULL OR d.sha256 IS NULL OR d.sha256 = v.sha256) "
+             f"AND NOT {archive_mod.in_archive_sql(archive, 'd')})")
+    return f"(CASE WHEN {archive_mod.in_archive_sql(archive, 'v')} THEN 0 ELSE {count} END)" if archive else count
 
 
 def _like(term: str) -> str:
@@ -51,13 +54,16 @@ def item_from_row(row: sqlite3.Row, tags: list[str]) -> dict:
 
 
 def get_video(conn: sqlite3.Connection, video_id: int) -> dict | None:
+    dup_count = _dup_count_sql(archive_mod.folders(conn))
     row = conn.execute(
-        f"SELECT v.*, {_DUP_COUNT} AS dup_count, {PLACE_SQL} AS place FROM videos v WHERE v.id = ? AND v.missing = 0", (video_id,)
+        f"SELECT v.*, {dup_count} AS dup_count, {PLACE_SQL} AS place FROM videos v WHERE v.id = ? AND v.missing = 0",
+        (video_id,),
     ).fetchone()
     return item_from_row(row, tags_for(conn, [video_id])[video_id]) if row else None
 
 
 def _filter_clause(
+    archive: Sequence[str] = (),
     *,
     q: str = "",
     tags: Sequence[str] = (),
@@ -70,11 +76,13 @@ def _filter_clause(
     date_to: str | None = None,
     bad_name: bool = False,
     duplicates: bool = False,
+    hide_copies: bool = False,
 ) -> tuple[str, list]:
     """SQL WHERE clause (over `videos v`) and its parameters for the search filters.
 
     With several `tags`, `tag_mode` "all" keeps videos that have every one of them and "any" keeps videos
-    that have at least one.
+    that have at least one. `hide_copies` leaves out videos in `archive` folders that are copies of a video
+    shown elsewhere.
     """
     if tag_mode not in ("all", "any"):
         raise ValueError(f"tag_mode must be 'all' or 'any', not {tag_mode!r}")
@@ -119,7 +127,9 @@ def _filter_clause(
         where.append("v.name_score < ?")
         params.append(config.BAD_NAME_THRESHOLD)
     if duplicates:
-        where.append(f"{_DUP_COUNT} > 0")
+        where.append(f"{_dup_count_sql(list(archive))} > 0")
+    if hide_copies and archive:
+        where.append(f"NOT {archive_mod.hidden_copy_sql(list(archive))}")
     return " AND ".join(where), params
 
 
@@ -138,13 +148,14 @@ def search_videos(
     **filters,
 ) -> dict:
     """One page of the videos matching `filters` (the keyword arguments of `_filter_clause`)."""
-    clause, params = _filter_clause(**filters)
+    archive = archive_mod.folders(conn)
+    clause, params = _filter_clause(archive, **filters)
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
 
     total = conn.execute(f"SELECT COUNT(*) FROM videos v WHERE {clause}", params).fetchone()[0]
     rows = conn.execute(
-        f"SELECT v.*, {_DUP_COUNT} AS dup_count, {PLACE_SQL} AS place FROM videos v WHERE {clause} "
+        f"SELECT v.*, {_dup_count_sql(archive)} AS dup_count, {PLACE_SQL} AS place FROM videos v WHERE {clause} "
         f"{_order_by(sort, order)} "
         "LIMIT ? OFFSET ?",
         params + [page_size, (page - 1) * page_size],
@@ -160,7 +171,7 @@ def search_videos(
 
 def all_matches(conn: sqlite3.Connection, *, sort: str = "date", order: str = "desc", **filters) -> list[sqlite3.Row]:
     """Every video matching `filters`, in display order (not just one page), for bulk actions."""
-    clause, params = _filter_clause(**filters)
+    clause, params = _filter_clause(archive_mod.folders(conn), **filters)
     return conn.execute(f"SELECT v.* FROM videos v WHERE {clause} {_order_by(sort, order)}", params).fetchall()
 
 

@@ -15,7 +15,7 @@ function el(tag, props = {}, ...children) {
 
 const state = {
   q: "", sort: "date", order: "desc", tags: new Set(), tagMode: "all", exts: new Set(), folder: "",
-  dateFrom: "", dateTo: "", minDur: "", maxDur: "", bad: false, dup: false,
+  dateFrom: "", dateTo: "", minDur: "", maxDur: "", bad: false, dup: false, hideCopies: true,
   page: 1, pageSize: 60, items: [], total: 0, current: -1, allTags: false,
 };
 const COMMON_TAG = 10; // the tag list shows tags on more than this many videos until "Load more"
@@ -72,6 +72,7 @@ function queryString(page) {
   if (state.maxDur !== "") p.set("max_dur", String(parseFloat(state.maxDur) * 60));
   if (state.bad) p.set("bad_name", "true");
   if (state.dup) p.set("duplicates", "true");
+  if (state.hideCopies) p.set("hide_copies", "true");
   return p.toString();
 }
 
@@ -181,6 +182,7 @@ function bindFilters() {
   });
   $("bad").addEventListener("change", (e) => { state.bad = e.target.checked; refresh(); });
   $("dup").addEventListener("change", (e) => { state.dup = e.target.checked; refresh(); });
+  $("hideCopies").addEventListener("change", (e) => { state.hideCopies = e.target.checked; refresh(); });
   for (const [id, key] of [["dateFrom", "dateFrom"], ["dateTo", "dateTo"], ["minDur", "minDur"], ["maxDur", "maxDur"]]) {
     $(id).addEventListener("change", (e) => { state[key] = e.target.value; refresh(); });
   }
@@ -196,9 +198,9 @@ function bindFilters() {
   $("more").addEventListener("click", () => load(false));
   $("moreTags").addEventListener("click", () => { state.allTags = !state.allTags; loadFacets(); });
   $("clear").addEventListener("click", () => {
-    Object.assign(state, { q: "", tags: new Set(), tagMode: "all", exts: new Set(), folder: "", dateFrom: "", dateTo: "", minDur: "", maxDur: "", bad: false, dup: false });
+    Object.assign(state, { q: "", tags: new Set(), tagMode: "all", exts: new Set(), folder: "", dateFrom: "", dateTo: "", minDur: "", maxDur: "", bad: false, dup: false, hideCopies: true });
     showTagMode();
-    $("q").value = ""; $("bad").checked = false; $("dup").checked = false;
+    $("q").value = ""; $("bad").checked = false; $("dup").checked = false; $("hideCopies").checked = true;
     for (const id of ["dateFrom", "dateTo", "minDur", "maxDur"]) $(id).value = "";
     loadFacets(); load(true);
   });
@@ -265,6 +267,7 @@ function openModal(index) {
   if (v.caption) rows.push(["Description", v.caption]);
   if (v.dup_count) rows.push(["Duplicates", `${v.dup_count} other file(s) with the same size — run \`vidcat dupes\` to review`]);
   for (const [k, val] of rows) meta.append(el("dt", {}, k), el("dd", {}, val));
+  showCopies(v, meta);
   $("prev").disabled = index <= 0;
   $("next").disabled = index >= state.items.length - 1;
   if (!modal.open) modal.showModal();
@@ -288,6 +291,18 @@ async function showPlace(v, node) {
     v.place = place || "";
   } catch { /* keep just the coordinates; try again next time */ }
   if (node.isConnected) show(place); // unless the user moved on to another video meanwhile
+}
+
+// Other copies of this video (identical files, or the same clip as another file), e.g. in an archive folder.
+async function showCopies(v, meta) {
+  let copies = [];
+  try { copies = await api(`/api/videos/${v.id}/copies`); } catch { return; }
+  if (!copies.length || state.items[state.current] !== v || !meta.isConnected) return; // moved on meanwhile
+  const list = el("span", {}, ...copies.flatMap((c, i) => [
+    ...(i ? [el("br")] : []),
+    c.path, el("small", {}, ` (${c.identical ? "identical" : "same clip, different file"}${c.archived ? ", archive" : ""})`),
+  ]));
+  meta.append(el("dt", {}, "Also in"), el("dd", {}, list));
 }
 
 function renderModalTags(v) {

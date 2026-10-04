@@ -4,18 +4,22 @@ import sqlite3
 from collections import defaultdict
 from collections.abc import Callable
 
-from . import config, disposal, hashing
+from . import archive, config, disposal, hashing
 from .tags import merge_tags
 
 Progress = Callable[[str, int, int], None]
 
 
 def find_duplicate_groups(conn: sqlite3.Connection, on_progress: Progress | None = None) -> list[list[sqlite3.Row]]:
-    """Return groups (len >= 2) of byte-identical files. Largest reclaimable space first."""
+    """Return groups (len >= 2) of byte-identical files. Largest reclaimable space first.
+
+    Files in archive folders are left out entirely, so they're never offered for removal.
+    """
     report = on_progress or (lambda *_: None)
 
     by_size = defaultdict(list)
-    for r in conn.execute("SELECT * FROM videos WHERE missing = 0 AND size > 0"):
+    in_archive = archive.in_archive_sql(archive.folders(conn), "videos")
+    for r in conn.execute(f"SELECT * FROM videos WHERE missing = 0 AND size > 0 AND NOT {in_archive}"):
         by_size[r["size"]].append(r)
     candidates = [g for g in by_size.values() if len(g) > 1]
 

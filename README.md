@@ -30,6 +30,7 @@ vidcat tag add 12 family "2019 trip"           # tag by id (see `vidcat ls`), pa
 vidcat tag remove 12 family
 vidcat tag list                                # all tags with counts
 vidcat places [--dry-run]                      # look up place names for every filming spot ahead of time
+vidcat archive add ~/Movies/GoPro              # keep a folder as is: hide its copies, never remove from it (also: remove, list)
 vidcat ls beach --tag family --bad-names       # search the catalog from the terminal
 vidcat serve --open                            # web UI at http://127.0.0.1:8000
 ```
@@ -83,6 +84,15 @@ H.264; lower is better), and `--preset slow` for smaller output at the cost of t
   keep); `keep`, `trash`, `archive` and `delete` skip the question (`delete` still asks you to confirm).
   Re-running is cheap: files that already have a good `.mp4` are not re-encoded, so you can convert first, play
   a few results, and later run `vidcat transcode --originals trash` to clean up.
+
+### Archive folders
+Some folders are worth keeping exactly as they are even though they repeat videos found elsewhere: raw camera
+footage, or a collection someone shared that overlaps your own. `vidcat archive add FOLDER` marks one (then `vidcat
+scan` it as usual). Nothing in an archive folder is ever offered for removal by `vidcat dupes`, archive copies don't
+count as "possible duplicates", and the web viewer's **Hide copies in archive folders** filter (on by default) shows
+each video once: an archive video is hidden when the same video is shown elsewhere, either an identical file or the
+same clip saved as a different file (same capture time and length, e.g. a re-export or conversion). The detail view
+lists a video's other copies under "Also in". Untick the filter to see everything.
 
 ### Volumes without a Trash
 Network shares (SMB, NFS, AFP) usually have no Trash, and macOS's trash call can hang forever on them, waiting on

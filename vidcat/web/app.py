@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import config, export, media, names, places, queries, tags, vision
+from .. import archive, config, export, media, names, places, queries, tags, vision
 from ..db import connect
 from ..scanner import thumb_path
 
@@ -41,13 +41,14 @@ def search_filters(
     date_to: str | None = None,
     bad_name: bool = False,
     duplicates: bool = False,
+    hide_copies: bool = False,  # leave out archive-folder copies of videos shown elsewhere
     sort: str = "date",
     order: str = "desc",
 ) -> dict:
     """The grid's search and filter query parameters, shared by the listing and "Save all"."""
     return dict(q=q, tags=tag, tag_mode=tag_mode, exts=ext, folder=folder, min_dur=min_dur, max_dur=max_dur,
-                date_from=date_from, date_to=date_to, bad_name=bad_name, duplicates=duplicates, sort=sort,
-                order=order)
+                date_from=date_from, date_to=date_to, bad_name=bad_name, duplicates=duplicates,
+                hide_copies=hide_copies, sort=sort, order=order)
 
 
 def create_app(
@@ -196,6 +197,12 @@ def create_app(
         except places.PlaceUnavailable as e:
             raise HTTPException(503, str(e)) from e
         return {"place": name}
+
+    @app.get("/api/videos/{video_id}/copies")
+    def get_copies(video_id: int, conn=Depends(get_conn)):
+        """Other cataloged copies of this video (identical files, or the same clip as a different file)."""
+        video_or_404(conn, video_id)
+        return archive.copies(conn, video_id)
 
     @app.post("/api/videos/{video_id}/reveal")
     def reveal(video_id: int, conn=Depends(get_conn)):
