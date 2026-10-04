@@ -104,6 +104,9 @@ def test_place_endpoint(client, tmp_path, monkeypatch):
     assert item(with_gps)["place"] == "Santa Cruz (en-GB)"     # now it comes with the video, no lookup needed
     listed = {v["id"]: v for v in client.get("/api/videos").json()["items"]}
     assert listed[with_gps]["place"] == "Santa Cruz (en-GB)" and listed[without]["place"] is None
+    found = lambda q: [v["id"] for v in client.get("/api/videos", params={"q": q}).json()["items"]]
+    assert found("santa cruz") == [with_gps]                   # place names are searchable
+    assert found("cruz zebra") == []                           # every word must match somewhere
     assert client.get(f"/api/videos/{without}/place").json() == {"place": None}
 
     def offline(*a):

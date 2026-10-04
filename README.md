@@ -98,7 +98,7 @@ Files on local disks still go to the Trash as before, and a Trash call that does
 abandoned with an error instead of hanging.
 
 ### Web UI
-Search names/paths/tags/descriptions; sort by date, name, size, length; filter by tag, format, folder, date range,
+Search names/paths/tags/descriptions/places; sort by date, name, size, length; filter by tag, format, folder, date range,
 length, "needs a better name", and "possible duplicates". Click a video to play it, edit its tags, or rename it
 (with the same suggestions, including AI). Browsers can't play every format (AVI, MTS, WMV…); for those use
 "Show in Finder" or Download (or convert them with `vidcat transcode`). Videos whose file records where they were

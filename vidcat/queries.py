@@ -84,10 +84,11 @@ def _filter_clause(
         like = _like(term)
         where.append(
             "(v.name LIKE ? ESCAPE '\\' OR v.path LIKE ? ESCAPE '\\' OR v.caption LIKE ? ESCAPE '\\' "
+            f"OR {PLACE_SQL} LIKE ? ESCAPE '\\' "
             "OR EXISTS (SELECT 1 FROM video_tags vt JOIN tags t ON t.id = vt.tag_id "
             "WHERE vt.video_id = v.id AND t.name LIKE ? ESCAPE '\\'))"
         )
-        params += [like, like, like, like]
+        params += [like, like, like, like, like]
     tag_groups = [[t] for t in tags] if tag_mode == "all" else [list(tags)] if tags else []
     for group in tag_groups:
         where.append(
