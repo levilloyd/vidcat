@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from datetime import date, timedelta
 
 from . import config
+from .places import PLACE_SQL
 from .tags import tags_for
 
 SORTS = {
@@ -43,13 +44,15 @@ def item_from_row(row: sqlite3.Row, tags: list[str]) -> dict:
     d["rev"] = f"{row['added_at']}-{row['size']}-{int(row['mtime'])}"
     d["bad_name"] = row["name_score"] < config.BAD_NAME_THRESHOLD
     d["dup_count"] = row["dup_count"]
+    # Name of where it was filmed, if already looked up: None = not yet (the UI asks /place), "" = nothing there.
+    d["place"] = row["place"]
     d["tags"] = tags
     return d
 
 
 def get_video(conn: sqlite3.Connection, video_id: int) -> dict | None:
     row = conn.execute(
-        f"SELECT v.*, {_DUP_COUNT} AS dup_count FROM videos v WHERE v.id = ? AND v.missing = 0", (video_id,)
+        f"SELECT v.*, {_DUP_COUNT} AS dup_count, {PLACE_SQL} AS place FROM videos v WHERE v.id = ? AND v.missing = 0", (video_id,)
     ).fetchone()
     return item_from_row(row, tags_for(conn, [video_id])[video_id]) if row else None
 
@@ -140,7 +143,8 @@ def search_videos(
 
     total = conn.execute(f"SELECT COUNT(*) FROM videos v WHERE {clause}", params).fetchone()[0]
     rows = conn.execute(
-        f"SELECT v.*, {_DUP_COUNT} AS dup_count FROM videos v WHERE {clause} {_order_by(sort, order)} "
+        f"SELECT v.*, {_DUP_COUNT} AS dup_count, {PLACE_SQL} AS place FROM videos v WHERE {clause} "
+        f"{_order_by(sort, order)} "
         "LIMIT ? OFFSET ?",
         params + [page_size, (page - 1) * page_size],
     ).fetchall()

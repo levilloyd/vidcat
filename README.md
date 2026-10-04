@@ -29,6 +29,7 @@ vidcat transcode [--dry-run]                   # convert old .mpg/.wmv/.avi/.mov
 vidcat tag add 12 family "2019 trip"           # tag by id (see `vidcat ls`), path, or file name
 vidcat tag remove 12 family
 vidcat tag list                                # all tags with counts
+vidcat places [--dry-run]                      # look up place names for every filming spot ahead of time
 vidcat ls beach --tag family --bad-names       # search the catalog from the terminal
 vidcat serve --open                            # web UI at http://127.0.0.1:8000
 ```
@@ -106,7 +107,8 @@ first minute is read, since reading all of it means reading the whole file), e.g
 States", with the coordinates and a "Show on map" link. The name is looked up from OpenStreetMap
 ([Nominatim](https://nominatim.org)) the first time such a video is opened, which sends it the coordinates (nothing
 else); answers are kept in the catalog, so each spot (to about 100 m) is looked up only once. Offline, just the
-coordinates are shown. Catalogs from before this feature pick up locations on the next `vidcat scan`, which
+coordinates are shown. `vidcat places` looks up every spot in the catalog ahead of time (one a second, as
+OpenStreetMap asks; Ctrl+C is safe), so opening a video never waits for one. Catalogs from before this feature pick up locations on the next `vidcat scan`, which
 re-reads only MP4/MOV/M4V/3GP files once. The server only listens on localhost and
 rejects foreign Host/Origin headers, because it can rename files and has no login.
 

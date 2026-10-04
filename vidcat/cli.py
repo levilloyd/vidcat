@@ -1,4 +1,4 @@
-"""Command-line interface: scan, dupes, names, tag, ls, serve."""
+"""Command-line interface: scan, dupes, names, places, tag, ls, serve."""
 import os
 import subprocess
 import sys
@@ -17,8 +17,8 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from . import (
-    config, disposal, duplicates, media, names as names_mod, queries, scanner, tags as tags_mod, transcode as transcode_mod,
-    vision,
+    config, disposal, duplicates, media, names as names_mod, places as places_mod, queries, scanner, tags as tags_mod,
+    transcode as transcode_mod, vision,
 )
 from .db import connect
 
@@ -392,6 +392,54 @@ def undo_rename(
         console.print(f"Restored {os.path.basename(result[1])}")
     if restored > 1:
         console.print(f"[green]Reverted {restored} renames.[/green]")
+
+
+# --------------------------------------------------------------------------- places
+
+@app.command()
+def places(
+    ctx: typer.Context,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Only count the spots that would be looked up.")] = False,
+    language: Annotated[str, typer.Option(help="Language for place names, e.g. en, fr, es.")] = "en",
+):
+    """Look up place names for every spot videos were filmed at, so the web UI never waits for one."""
+    conn = open_db(ctx)
+    spots = places_mod.unnamed_spots(conn)
+    if not spots:
+        console.print("Every video with a location already has its place name.")
+        return
+    minutes = len(spots) / 60
+    console.print(f"{len(spots)} spot{'' if len(spots) == 1 else 's'} to look up "
+                  f"(OpenStreetMap allows one a second, so about {max(1, round(minutes))} min).")
+    if dry_run:
+        return
+    found = nothing = failures = 0
+    progress = Progress(SpinnerColumn(), TextColumn("Looking up places"), BarColumn(), MofNCompleteColumn(),
+                        TimeRemainingColumn(), console=console, transient=True)
+    try:
+        with progress:
+            task = progress.add_task("", total=len(spots))
+            for lat, lon in spots:
+                try:
+                    name = places_mod.place_name(conn, lat, lon, language)
+                except places_mod.PlaceUnavailable as e:
+                    failures += 1
+                    if failures >= 3:  # three in a row: offline, or the service is down
+                        progress.stop()
+                        console.print(f"[red]Stopped: {e}[/red]")
+                        break
+                    progress.advance(task)
+                    continue
+                failures = 0
+                found += bool(name)
+                nothing += not name
+                progress.advance(task)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted. Place names found so far are kept.[/yellow]")
+    left = len(places_mod.unnamed_spots(conn))
+    console.print(f"[green]Done.[/green] {found} place name{'' if found == 1 else 's'} saved"
+                  f"{f', {nothing} with nothing there (open water)' if nothing else ''}"
+                  f"{f'; {left} still to look up, run it again later' if left else ''}.")
 
 
 # --------------------------------------------------------------------------- transcode

@@ -97,8 +97,13 @@ def test_place_endpoint(client, tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     monkeypatch.setattr(places, "_lookup", lambda lat, lon, lang: f"Santa Cruz ({lang})")
+    item = lambda vid: client.get(f"/api/videos/{vid}").json()
+    assert item(with_gps)["place"] is None                     # not looked up yet: the UI will ask
     r = client.get(f"/api/videos/{with_gps}/place", headers={"Accept-Language": "en-GB"})
     assert r.json() == {"place": "Santa Cruz (en-GB)"}
+    assert item(with_gps)["place"] == "Santa Cruz (en-GB)"     # now it comes with the video, no lookup needed
+    listed = {v["id"]: v for v in client.get("/api/videos").json()["items"]}
+    assert listed[with_gps]["place"] == "Santa Cruz (en-GB)" and listed[without]["place"] is None
     assert client.get(f"/api/videos/{without}/place").json() == {"place": None}
 
     def offline(*a):

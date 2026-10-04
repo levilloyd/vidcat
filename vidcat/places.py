@@ -25,8 +25,20 @@ class PlaceUnavailable(RuntimeError):
     pass
 
 
+def _round(x: float) -> int:
+    """Round half away from zero, like SQLite's round(), so PLACE_SQL finds the same cache row."""
+    return int(abs(x) + 0.5) * (1 if x >= 0 else -1)
+
+
 def _key(lat: float, lon: float) -> tuple[int, int]:
-    return round(lat * _KEY_SCALE), round(lon * _KEY_SCALE)
+    return _round(lat * _KEY_SCALE), _round(lon * _KEY_SCALE)
+
+
+# The cached place name for a video row `v`, as a SELECT expression: NULL = not looked up yet, '' = nothing there.
+PLACE_SQL = (
+    f"(SELECT name FROM places WHERE lat_key = CAST(round(v.latitude * {_KEY_SCALE}) AS INTEGER) "
+    f"AND lon_key = CAST(round(v.longitude * {_KEY_SCALE}) AS INTEGER))"
+)
 
 
 def describe(result: dict) -> str:
@@ -77,3 +89,15 @@ def place_name(conn: sqlite3.Connection, lat: float, lon: float, language: str |
     else:
         name = row["name"]
     return name or None
+
+
+def unnamed_spots(conn: sqlite3.Connection) -> list[tuple[float, float]]:
+    """One (latitude, longitude) per cache spot that cataloged videos were filmed at but has no saved place name."""
+    spots: dict[tuple[int, int], tuple[float, float]] = {}
+    rows = conn.execute(
+        f"SELECT latitude, longitude FROM videos v WHERE latitude IS NOT NULL AND missing = 0 AND {PLACE_SQL} IS NULL "
+        "ORDER BY created_at"
+    )
+    for lat, lon in rows:
+        spots.setdefault(_key(lat, lon), (lat, lon))
+    return list(spots.values())

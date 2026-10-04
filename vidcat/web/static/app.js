@@ -262,17 +262,24 @@ function openModal(index) {
   if (!modal.open) modal.showModal();
 }
 
-// Place names are looked up online the first time, so the row fills in when the answer arrives. If the lookup
-// fails (offline, say) the coordinates are still shown.
+// Place names already looked up come with the video (v.place: "" = nothing there). Otherwise the name is looked
+// up online, once per spot, and the row fills in when the answer arrives. If that fails (offline, say) the
+// coordinates are still shown.
 async function showPlace(v, node) {
+  const show = (place) => {
+    node.textContent = place || "";
+    node.classList.remove("muted");
+    node.nextSibling.hidden = !place; // the line break
+  };
+  if (v.place != null) return show(v.place);
   node.textContent = "Looking up place…";
   node.classList.add("muted");
   let place = null;
-  try { place = (await api(`/api/videos/${v.id}/place`)).place; } catch { /* keep just the coordinates */ }
-  if (!node.isConnected) return; // moved on to another video meanwhile
-  node.textContent = place || "";
-  node.classList.remove("muted");
-  node.nextSibling.hidden = !place; // the line break
+  try {
+    place = (await api(`/api/videos/${v.id}/place`)).place;
+    v.place = place || "";
+  } catch { /* keep just the coordinates; try again next time */ }
+  if (node.isConnected) show(place); // unless the user moved on to another video meanwhile
 }
 
 function renderModalTags(v) {
