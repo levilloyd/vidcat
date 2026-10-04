@@ -153,6 +153,48 @@ def test_media_supports_range_requests(client):
     assert part.headers["content-range"].startswith("bytes 0-99/")
 
 
+def test_media_stops_when_the_browser_hangs_up(tmp_path, monkeypatch):
+    """A browser that abandons a video (seeking, skipping ahead) must not leave the file open forever."""
+    import anyio
+
+    from vidcat.web.app import MediaResponse
+
+    video = tmp_path / "big.mp4"
+    video.write_bytes(b"\0" * (4 * 1024 * 1024))
+    opened = []
+    real_open = anyio.open_file
+
+    async def tracking_open(*a, **kw):
+        f = await real_open(*a, **kw)
+        opened.append(f)
+        return f
+    monkeypatch.setattr(anyio, "open_file", tracking_open)
+
+    async def main():
+        hung_up = anyio.Event()
+        requested = False
+
+        async def receive():
+            nonlocal requested
+            if not requested:
+                requested = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await hung_up.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            if message["type"] == "http.response.body":
+                hung_up.set()
+                await anyio.sleep_forever()  # the connection is gone: like a socket that never drains
+
+        scope = {"type": "http", "method": "GET", "headers": [], "asgi": {"spec_version": "2.4"}}
+        with anyio.fail_after(5):
+            await MediaResponse(video)(scope, receive, send)
+
+    anyio.run(main)
+    assert opened and all(f.wrapped.closed for f in opened)
+
+
 def test_thumbnails_served_and_lazily_created(client, tmp_path):
     vid = client.get("/api/videos").json()["items"][0]
     (tmp_path / "thumbs" / f"{vid['id']}.jpg").unlink()

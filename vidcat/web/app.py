@@ -1,11 +1,13 @@
 """FastAPI app: JSON API + media/thumbnail endpoints + the static frontend."""
 import mimetypes
 import subprocess
+from contextlib import closing
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
+import anyio
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +29,44 @@ class UpdateBody(BaseModel):
 
 class TagsBody(BaseModel):
     tags: list[str]
+
+
+class ClientGone(Exception):
+    pass
+
+
+class MediaResponse(FileResponse):
+    """A FileResponse that stops when the browser hangs up. The plain one never notices: it waits forever to send
+    the rest of the file, holding it open. Browsers abandon video requests all the time (seeking, skipping to the
+    next video), so the server soon ran out of open files. Here the stuck send fails instead, so the file is
+    closed the usual way."""
+
+    async def __call__(self, scope, receive, send):
+        gone, sending = False, None
+
+        async def until_disconnect():
+            nonlocal gone
+            while (await receive())["type"] != "http.disconnect":
+                pass
+            gone = True
+            if sending:
+                sending.cancel()
+
+        async def send_unless_gone(message):
+            nonlocal sending
+            with anyio.CancelScope() as sending:
+                if not gone:
+                    await send(message)
+            if gone:
+                raise ClientGone
+
+        try:
+            async with anyio.create_task_group() as group:
+                group.start_soon(until_disconnect)
+                await super().__call__(scope, receive, send_unless_gone)
+                group.cancel_scope.cancel()
+        except* ClientGone:
+            pass
 
 
 def search_filters(
@@ -231,12 +271,14 @@ def create_app(
         return queries.list_exts(conn)
 
     @app.get("/media/{video_id}")
-    def stream(video_id: int, conn=Depends(get_conn)):
-        item = video_or_404(conn, video_id)
+    def stream(video_id: int):
+        # Its own connection, closed before streaming starts: a request can last as long as the video plays.
+        with closing(connect(db, init=False)) as conn:
+            item = video_or_404(conn, video_id)
         if not Path(item["path"]).exists():
             raise HTTPException(404, "File is missing from disk")
         mime = mimetypes.guess_type(item["path"])[0] or "application/octet-stream"
-        return FileResponse(item["path"], media_type=mime)  # Starlette serves HTTP Range requests
+        return MediaResponse(item["path"], media_type=mime)  # Starlette serves HTTP Range requests
 
     @app.get("/thumb/{video_id}")
     def thumbnail(video_id: int, conn=Depends(get_conn)):
