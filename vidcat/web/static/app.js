@@ -16,8 +16,9 @@ function el(tag, props = {}, ...children) {
 const state = {
   q: "", sort: "date", order: "desc", tags: new Set(), tagMode: "all", exts: new Set(), folder: "",
   dateFrom: "", dateTo: "", minDur: "", maxDur: "", bad: false, dup: false,
-  page: 1, pageSize: 60, items: [], total: 0, current: -1,
+  page: 1, pageSize: 60, items: [], total: 0, current: -1, allTags: false,
 };
+const COMMON_TAG = 10; // the tag list shows tags on more than this many videos until "Load more"
 let requestId = 0;
 
 // ---------- formatting
@@ -136,9 +137,15 @@ function chip(label, count, on, onClick) {
 
 async function loadFacets() {
   const [tags, exts, folders] = await Promise.all([api("/api/tags"), api("/api/exts"), api("/api/folders")]);
-  $("tags").replaceChildren(...(tags.length ? tags.map((t) => chip(t.name, t.count, state.tags.has(t.name), () => {
+  // Selected tags always stay visible, so they can be seen and unselected.
+  const common = tags.filter((t) => t.count > COMMON_TAG || state.tags.has(t.name));
+  const shown = state.allTags ? tags : common;
+  const hidden = tags.length - common.length;
+  $("tags").replaceChildren(...(tags.length ? shown.map((t) => chip(t.name, t.count, state.tags.has(t.name), () => {
     toggleSet(state.tags, t.name); loadFacets(); load(true);
   })) : [el("span", { class: "sub" }, "No tags yet")]));
+  $("moreTags").hidden = hidden === 0;
+  $("moreTags").textContent = state.allTags ? "Show fewer" : `Load more (${hidden.toLocaleString()})`;
   $("exts").replaceChildren(...exts.map((e) => chip("." + e.ext, e.count, state.exts.has(e.ext), () => {
     toggleSet(state.exts, e.ext); loadFacets(); load(true);
   })));
@@ -187,6 +194,7 @@ function bindFilters() {
     });
   }
   $("more").addEventListener("click", () => load(false));
+  $("moreTags").addEventListener("click", () => { state.allTags = !state.allTags; loadFacets(); });
   $("clear").addEventListener("click", () => {
     Object.assign(state, { q: "", tags: new Set(), tagMode: "all", exts: new Set(), folder: "", dateFrom: "", dateTo: "", minDur: "", maxDur: "", bad: false, dup: false });
     showTagMode();
