@@ -119,7 +119,16 @@ States", with the coordinates and a "Show on map" link. The name is looked up fr
 else); answers are kept in the catalog, so each spot (to about 100 m) is looked up only once. Offline, just the
 coordinates are shown. `vidcat places` looks up every spot in the catalog ahead of time (one a second, as
 OpenStreetMap asks; Ctrl+C is safe), so opening a video never waits for one. Catalogs from before this feature pick up locations on the next `vidcat scan`, which
-re-reads only MP4/MOV/M4V/3GP files once. The server only listens on localhost and
+re-reads only MP4/MOV/M4V/3GP files once.
+
+**Map.** The **Map** button (or `/#map`) shows a pin for every video in the current results that records where it
+was filmed; the search and filters apply as in the grid, so e.g. a tag shows just that trip. Nearby pins are grouped
+into numbered clusters (click to zoom in). A pin shows the video's thumbnail, date and place; click that to open the
+video, where Previous/Next step through the videos in view on the map, oldest first. Map tiles come from
+OpenStreetMap, which sees the area being viewed; nothing is fetched from it until the map is opened. The map
+library ([Leaflet](https://leafletjs.com)) is bundled in `vidcat/web/static/vendor`.
+
+The server only listens on localhost and
 rejects foreign Host/Origin headers, because it can rename files and has no login.
 
 **Saving a set of videos.** "Save all…" copies every video in the current results (all of them, not just the ones

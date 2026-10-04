@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Video Library</title>
+  <link rel="stylesheet" href="vendor/leaflet.css">
+  <link rel="stylesheet" href="vendor/MarkerCluster.css">
+  <link rel="stylesheet" href="vendor/MarkerCluster.Default.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -21,6 +24,10 @@
       </select>
     </label>
     <button id="order" type="button" title="Toggle sort direction">↓</button>
+    <div class="segmented" role="group" aria-label="View">
+      <button id="viewGrid" type="button" aria-pressed="true">Grid</button>
+      <button id="viewMap" type="button" aria-pressed="false" title="Where videos were filmed">Map</button>
+    </div>
   </header>
 
   <div class="layout">
@@ -77,6 +84,8 @@
       </div>
       <div id="grid"></div>
       <button id="more" type="button" hidden>Load more</button>
+      <!-- Map tiles come from OpenStreetMap, so nothing is fetched from it until the map is first shown. -->
+      <div id="map" hidden></div>
     </main>
   </div>
 
@@ -135,6 +144,8 @@
     </div>
   </dialog>
 
+  <script src="vendor/leaflet.js"></script>
+  <script src="vendor/leaflet.markercluster.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

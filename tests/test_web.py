@@ -120,6 +120,24 @@ def test_place_endpoint(client, tmp_path, monkeypatch):
     assert client.get(f"/api/videos/{with_gps}/place").status_code == 503
 
 
+def test_locations_for_the_map(client, tmp_path):
+    second, first = client.get("/api/videos").json()["items"][:2]
+    conn = connect(tmp_path / "web.db")
+    conn.execute("UPDATE videos SET latitude = 36.95, longitude = -122.02, created_at = 2000 WHERE id = ?", (second["id"],))
+    conn.execute("UPDATE videos SET latitude = 57.05, longitude = -135.33, created_at = 1000 WHERE id = ?", (first["id"],))
+    conn.commit()
+    conn.close()
+    data = client.get("/api/locations").json()
+    assert data["total"] == 3                                    # every match, with or without a location
+    assert [p["id"] for p in data["items"]] == [first["id"], second["id"]]  # only located videos, oldest first
+    pin = data["items"][1]
+    assert (pin["latitude"], pin["longitude"], pin["name"], pin["rev"]) == (36.95, -122.02, second["name"], second["rev"])
+    # The grid's search and filters apply to the map too.
+    narrowed = client.get("/api/locations", params={"q": second["name"]}).json()
+    assert narrowed["total"] == 1 and [p["id"] for p in narrowed["items"]] == [second["id"]]
+    assert client.get("/api/locations", params={"date_from": "not-a-date"}).status_code == 422
+
+
 def test_suggest_name_without_ai(client):
     vid = next(v for v in client.get("/api/videos").json()["items"] if v["date_source"] == "metadata")
     r = client.post(f"/api/videos/{vid['id']}/suggest-name").json()
@@ -191,6 +209,7 @@ def test_frontend_is_served(client):
     r = client.get("/")
     assert r.status_code == 200 and "Video Library" in r.text
     assert client.get("/app.js").status_code == 200
+    assert client.get("/vendor/leaflet.js").status_code == 200  # the map library is bundled, not fetched from a CDN
 
 
 # ---------- "Save all": copy every matching video to a chosen folder

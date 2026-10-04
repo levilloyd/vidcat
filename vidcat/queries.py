@@ -36,15 +36,19 @@ def _local_epoch(d: str, end_of_day: bool = False) -> int:
     return int(time.mktime(day.timetuple()))
 
 
+def _rev(row: sqlite3.Row) -> str:
+    """Changes whenever the file behind an id does: new content, or a new file given a deleted row's id
+    (SQLite reuses the highest id). The UI puts it in media/thumbnail URLs so browsers never show a cached
+    copy of a different video."""
+    return f"{row['added_at']}-{row['size']}-{int(row['mtime'])}"
+
+
 def item_from_row(row: sqlite3.Row, tags: list[str]) -> dict:
     d = {k: row[k] for k in (
         "id", "path", "dir", "name", "ext", "size", "created_at", "date_source", "duration", "width", "height",
         "codec", "name_score", "caption", "rotation", "latitude", "longitude",
     )}
-    # Changes whenever the file behind this id does: new content, or a new file given a deleted row's id
-    # (SQLite reuses the highest id). The UI puts it in media/thumbnail URLs so browsers never show a cached
-    # copy of a different video.
-    d["rev"] = f"{row['added_at']}-{row['size']}-{int(row['mtime'])}"
+    d["rev"] = _rev(row)
     d["bad_name"] = row["name_score"] < config.BAD_NAME_THRESHOLD
     d["dup_count"] = row["dup_count"]
     # Name of where it was filmed, if already looked up: None = not yet (the UI asks /place), "" = nothing there.
@@ -173,6 +177,22 @@ def all_matches(conn: sqlite3.Connection, *, sort: str = "date", order: str = "d
     """Every video matching `filters`, in display order (not just one page), for bulk actions."""
     clause, params = _filter_clause(archive_mod.folders(conn), **filters)
     return conn.execute(f"SELECT v.* FROM videos v WHERE {clause} {_order_by(sort, order)}", params).fetchall()
+
+
+def located_videos(conn: sqlite3.Connection, *, sort: str = "date", order: str = "desc", **filters) -> dict:
+    """Map pins: every video matching `filters` that records where it was filmed, oldest first, with just
+    enough to label a pin. `total` counts all matches, with or without a location."""
+    clause, params = _filter_clause(archive_mod.folders(conn), **filters)
+    total = conn.execute(f"SELECT COUNT(*) FROM videos v WHERE {clause}", params).fetchone()[0]
+    rows = conn.execute(
+        f"SELECT v.*, {PLACE_SQL} AS place FROM videos v WHERE {clause} AND v.latitude IS NOT NULL "
+        "ORDER BY v.created_at, v.id",
+        params,
+    ).fetchall()
+    items = [{"id": r["id"], "name": r["name"], "created_at": r["created_at"], "latitude": r["latitude"],
+              "longitude": r["longitude"], "rotation": r["rotation"], "place": r["place"], "rev": _rev(r)}
+             for r in rows]
+    return {"items": items, "total": total}
 
 
 def list_folders(conn: sqlite3.Connection) -> list[dict]:

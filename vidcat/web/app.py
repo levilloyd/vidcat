@@ -98,6 +98,14 @@ def create_app(
         except ValueError as e:  # bad date format
             raise HTTPException(422, str(e)) from e
 
+    @app.get("/api/locations")
+    def list_locations(filters: dict = Depends(search_filters), conn=Depends(get_conn)):
+        """Where each matching video was filmed, for the map."""
+        try:
+            return queries.located_videos(conn, **filters)
+        except ValueError as e:  # bad date format
+            raise HTTPException(422, str(e)) from e
+
     @app.post("/api/export")
     def start_export(filters: dict = Depends(search_filters), conn=Depends(get_conn)):
         """Ask where to save, then copy every video matching the filters there (not just the loaded page)."""

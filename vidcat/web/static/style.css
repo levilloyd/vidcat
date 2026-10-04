@@ -118,6 +118,17 @@ aside select { width: 100%; }
 .flag { background: var(--warn-bg); color: var(--warn); border-radius: 4px; padding: 0 6px; font-size: 12px; }
 .card .chips .chip { cursor: inherit; font-size: 12px; padding: 0 8px; }
 #more { display: block; margin: 20px auto; }
+header .segmented button { padding: 7px 12px; font-size: 14px; }
+
+/* Map view: clustered pins, and a popup that opens the video. */
+#map { height: calc(100vh - 140px); min-height: 360px; border: 1px solid var(--border); border-radius: 10px; }
+.pin { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.35); box-sizing: border-box; }
+.leaflet-popup-content { margin: 10px; width: 220px; font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }
+.map-pop { display: flex; flex-direction: column; gap: 4px; background: none; color: inherit; padding: 0; text-align: left; cursor: pointer; width: 100%; }
+.map-pop .thumb { border-radius: 6px; width: 100%; }
+.map-pop .name { font-weight: 600; overflow-wrap: anywhere; }
+.map-pop .sub { color: var(--muted); }
 .empty { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 60px 0; }
 
 dialog { border: 1px solid var(--border); border-radius: 12px; padding: 0; background: var(--panel); color: var(--text); width: min(1200px, 96vw); max-height: 94vh; }

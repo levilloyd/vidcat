@@ -16,7 +16,8 @@ function el(tag, props = {}, ...children) {
 const state = {
   q: "", sort: "date", order: "desc", tags: new Set(), tagMode: "all", exts: new Set(), folder: "",
   dateFrom: "", dateTo: "", minDur: "", maxDur: "", bad: false, dup: false, hideCopies: true,
-  page: 1, pageSize: 60, items: [], total: 0, current: -1, allTags: false,
+  page: 1, pageSize: 60, items: [], total: 0, current: -1, allTags: false, view: "grid",
+  modalList: [], // what the detail view steps through: the grid's results, or the videos on the map
 };
 const COMMON_TAG = 10; // the tag list shows tags on more than this many videos until "Load more"
 let requestId = 0;
@@ -106,12 +107,20 @@ function renderGrid(fromIndex) {
   $("saveAll").textContent = state.total === 1 ? "Save…" : `Save all ${state.total.toLocaleString()}…`;
 }
 
-function makeCard(v, index) {
+// Re-run the search for whichever view is showing.
+function refresh() { return state.view === "map" ? loadMap() : load(true); }
+
+function makeThumb(v) {
   const thumb = el("div", { class: "thumb" });
   const img = el("img", { class: "rot", "data-rot": String(v.rotation || 0), src: `/thumb/${v.id}?v=${v.rev}`, alt: "", loading: "lazy" });
   img.addEventListener("error", () => { img.remove(); thumb.prepend(el("div", { class: "noimg" }, "No preview")); });
   thumb.append(img);
   if (v.duration) thumb.append(el("span", { class: "badge" }, fmtDur(v.duration)));
+  return thumb;
+}
+
+function makeCard(v, index) {
+  const thumb = makeThumb(v);
 
   const info = el("div", { class: "info" }, el("div", { class: "name" }, v.name),
     el("div", { class: "sub" }, `${fmtDate(v.created_at)} · ${fmtSize(v.size)}`));
@@ -143,12 +152,12 @@ async function loadFacets() {
   const shown = state.allTags ? tags : common;
   const hidden = tags.length - common.length;
   $("tags").replaceChildren(...(tags.length ? shown.map((t) => chip(t.name, t.count, state.tags.has(t.name), () => {
-    toggleSet(state.tags, t.name); loadFacets(); load(true);
+    toggleSet(state.tags, t.name); loadFacets(); refresh();
   })) : [el("span", { class: "sub" }, "No tags yet")]));
   $("moreTags").hidden = hidden === 0;
   $("moreTags").textContent = state.allTags ? "Show fewer" : `Load more (${hidden.toLocaleString()})`;
   $("exts").replaceChildren(...exts.map((e) => chip("." + e.ext, e.count, state.exts.has(e.ext), () => {
-    toggleSet(state.exts, e.ext); loadFacets(); load(true);
+    toggleSet(state.exts, e.ext); loadFacets(); refresh();
   })));
   const sel = $("folder");
   sel.replaceChildren(el("option", { value: "" }, "All folders"));
@@ -172,7 +181,6 @@ function showTagMode() {
 }
 
 function bindFilters() {
-  const refresh = () => load(true);
   $("q").addEventListener("input", debounce((e) => { state.q = e.target.value.trim(); refresh(); }, 250));
   $("sort").addEventListener("change", (e) => { state.sort = e.target.value; refresh(); });
   $("order").addEventListener("click", () => {
@@ -202,7 +210,7 @@ function bindFilters() {
     showTagMode();
     $("q").value = ""; $("bad").checked = false; $("dup").checked = false; $("hideCopies").checked = true;
     for (const id of ["dateFrom", "dateTo", "minDur", "maxDur"]) $(id).value = "";
-    loadFacets(); load(true);
+    loadFacets(); refresh();
   });
 }
 
@@ -215,9 +223,24 @@ function setStatus(msg, isError = false) {
   s.classList.toggle("error", isError);
 }
 
-function openModal(index) {
+const current = () => state.modalList[state.current];
+
+// Show video `index` of `list`. Map pins carry only what a pin needs, so their full details are fetched first.
+async function openModal(index, list = state.items) {
+  state.modalList = list;
   state.current = index;
-  const v = state.items[index];
+  let v = list[index];
+  if (!v.tags) {
+    try {
+      v = await api(`/api/videos/${v.id}`);
+    } catch (e) {
+      if (modal.open) setStatus(e.message, true); else $("summary").textContent = "Couldn't open the video: " + e.message;
+      return;
+    }
+    if (current() !== list[index]) return; // moved on meanwhile
+    list[index] = v;
+    replaceItem(v);
+  }
   setStatus("");
   const player = $("player");
   $("playerError").hidden = true;
@@ -269,7 +292,7 @@ function openModal(index) {
   for (const [k, val] of rows) meta.append(el("dt", {}, k), el("dd", {}, val));
   showCopies(v, meta);
   $("prev").disabled = index <= 0;
-  $("next").disabled = index >= state.items.length - 1;
+  $("next").disabled = index >= list.length - 1;
   if (!modal.open) modal.showModal();
 }
 
@@ -297,7 +320,7 @@ async function showPlace(v, node) {
 async function showCopies(v, meta) {
   let copies = [];
   try { copies = await api(`/api/videos/${v.id}/copies`); } catch { return; }
-  if (!copies.length || state.items[state.current] !== v || !meta.isConnected) return; // moved on meanwhile
+  if (!copies.length || current() !== v || !meta.isConnected) return; // moved on meanwhile
   const list = el("span", {}, ...copies.flatMap((c, i) => [
     ...(i ? [el("br")] : []),
     c.path, el("small", {}, ` (${c.identical ? "identical" : "same clip, different file"}${c.archived ? ", archive" : ""})`),
@@ -316,18 +339,20 @@ function renderModalTags(v) {
 }
 
 // Replace a video everywhere it's shown. Looked up by id, not by "current", because the user may have
-// moved to another video while the request was in flight.
+// moved to another video while the request was in flight. Returns whether it's the one in the detail view.
 function replaceItem(updated) {
+  for (const list of [state.items, state.modalList, mapState.items]) {
+    const i = list.findIndex((x) => x.id === updated.id);
+    if (i >= 0) list[i] = updated;
+  }
   const index = state.items.findIndex((x) => x.id === updated.id);
-  if (index < 0) return false;
-  state.items[index] = updated;
   const card = document.querySelector(`.card[data-id="${updated.id}"]`);
-  if (card) card.replaceWith(makeCard(updated, index));
-  return index === state.current;
+  if (card && index >= 0) card.replaceWith(makeCard(updated, index));
+  return current()?.id === updated.id;
 }
 
 async function mutateTags(method, suffix = "", body) {
-  const v = state.items[state.current];
+  const v = current();
   try {
     const updated = await api(`/api/videos/${v.id}/tags${suffix}`, { method, body });
     if (replaceItem(updated)) renderModalTags(updated);
@@ -349,7 +374,7 @@ function applyPlayerRotation(v) {
 }
 
 async function rotate(delta) {
-  const v = state.items[state.current];
+  const v = current();
   if (!v) return;
   const previous = v.rotation || 0;
   v.rotation = (previous + delta + 360) % 360;
@@ -379,15 +404,15 @@ function bindCustomControls() {
   $("cSeek").addEventListener("input", () => { if (p.duration) p.currentTime = (p.duration * $("cSeek").value) / 1000; });
   $("cMute").addEventListener("click", () => { p.muted = !p.muted; });
   $("cFull").addEventListener("click", () => (document.fullscreenElement ? document.exitFullscreen() : $("playerBox").requestFullscreen()));
-  p.addEventListener("loadedmetadata", () => { const v = state.items[state.current]; if (v) applyPlayerRotation(v); });
+  p.addEventListener("loadedmetadata", () => { const v = current(); if (v) applyPlayerRotation(v); });
 }
 
 function bindModal() {
   $("close").addEventListener("click", () => modal.close());
   modal.addEventListener("close", () => { $("player").pause(); $("player").removeAttribute("src"); $("player").load(); });
   modal.addEventListener("click", (e) => { if (e.target === modal) modal.close(); });
-  $("prev").addEventListener("click", () => state.current > 0 && openModal(state.current - 1));
-  $("next").addEventListener("click", () => state.current < state.items.length - 1 && openModal(state.current + 1));
+  $("prev").addEventListener("click", () => state.current > 0 && openModal(state.current - 1, state.modalList));
+  $("next").addEventListener("click", () => state.current < state.modalList.length - 1 && openModal(state.current + 1, state.modalList));
   modal.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT" || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "ArrowLeft") $("prev").click();
@@ -408,7 +433,7 @@ function bindModal() {
   });
 
   const rename = async () => {
-    const v = state.items[state.current];
+    const v = current();
     const name = $("nameInput").value.trim();
     if (!name || name === stem(v.name)) return;
     try {
@@ -423,7 +448,7 @@ function bindModal() {
   $("nameInput").addEventListener("keydown", (e) => { if (e.key === "Enter") rename(); });
 
   const suggest = (ai) => async () => {
-    const v = state.items[state.current];
+    const v = current();
     const buttons = [$("suggest"), $("suggestAi")];
     buttons.forEach((b) => (b.disabled = true));
     setStatus(ai ? "Asking the vision model… (can take a few seconds)" : "");
@@ -438,7 +463,80 @@ function bindModal() {
   $("suggest").addEventListener("click", suggest(false));
   $("suggestAi").addEventListener("click", suggest(true));
 
-  $("reveal").addEventListener("click", () => api(`/api/videos/${state.items[state.current].id}/reveal`, { method: "POST" }).catch((e) => setStatus(e.message, true)));
+  $("reveal").addEventListener("click", () => api(`/api/videos/${current().id}/reveal`, { method: "POST" }).catch((e) => setStatus(e.message, true)));
+}
+
+// ---------- map view: a pin for every matching video that records where it was filmed
+const mapState = { map: null, pins: null, items: [], requestId: 0 };
+
+function initMap() {
+  // Tiles come from OpenStreetMap, which sees the area being viewed; nothing is fetched before the map is shown.
+  mapState.map = L.map("map", { worldCopyJump: true }).setView([20, 0], 2);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(mapState.map);
+  // Nearby pins merge into a numbered cluster; videos filmed at the same spot fan out when it's clicked.
+  mapState.pins = L.markerClusterGroup({ maxClusterRadius: 50 });
+  mapState.map.addLayer(mapState.pins);
+}
+
+const PIN = () => L.divIcon({ className: "", html: '<div class="pin"></div>', iconSize: [14, 14] });
+
+// Built when the popup opens, so it shows the video's latest name, rotation and place.
+function mapPopup(id) {
+  const v = mapState.items.find((x) => x.id === id);
+  const pop = el("button", { class: "map-pop", type: "button", title: "Open video" }, makeThumb(v),
+    el("span", { class: "name" }, v.name),
+    el("span", { class: "sub" }, [fmtDate(v.created_at), v.place].filter(Boolean).join(" · ")));
+  pop.addEventListener("click", () => {
+    // Previous/Next step through the videos in view on the map, oldest first.
+    const bounds = mapState.map.getBounds();
+    const inView = mapState.items.filter((x) => x.id === id || bounds.contains([x.latitude, x.longitude]));
+    openModal(inView.findIndex((x) => x.id === id), inView);
+  });
+  return pop;
+}
+
+async function loadMap() {
+  const id = ++mapState.requestId;
+  let data;
+  try {
+    data = await api("/api/locations?" + queryString(1));
+  } catch (e) {
+    $("summary").textContent = "Error: " + e.message;
+    return;
+  }
+  if (id !== mapState.requestId || state.view !== "map") return;
+  mapState.items = data.items;
+  mapState.pins.clearLayers();
+  mapState.pins.addLayers(data.items.map((v) =>
+    L.marker([v.latitude, v.longitude], { icon: PIN(), title: v.name }).bindPopup(() => mapPopup(v.id), { minWidth: 220 })));
+  const n = data.items.length;
+  $("summary").textContent = n === data.total
+    ? `${n.toLocaleString()} video${n === 1 ? "" : "s"}`
+    : `${n.toLocaleString()} of ${data.total.toLocaleString()} video${data.total === 1 ? "" : "s"} recorded where ${data.total === 1 ? "it was" : "they were"} filmed`;
+  if (n) mapState.map.fitBounds(data.items.map((v) => [v.latitude, v.longitude]), { padding: [30, 30], maxZoom: 15 });
+}
+
+function showView(view) {
+  state.view = view;
+  $("viewGrid").setAttribute("aria-pressed", String(view === "grid"));
+  $("viewMap").setAttribute("aria-pressed", String(view === "map"));
+  $("grid").hidden = view !== "grid";
+  $("map").hidden = view !== "map";
+  $("sort").disabled = $("order").disabled = view === "map";
+  if (view === "map") {
+    $("more").hidden = $("saveAll").hidden = true;
+    if (mapState.map) mapState.map.invalidateSize(); // it was laid out while hidden
+    else initMap();
+  }
+  history.replaceState(null, "", view === "map" ? "#map" : location.pathname + location.search);
+  return refresh();
+}
+
+function bindViews() {
+  $("viewGrid").addEventListener("click", () => state.view !== "grid" && showView("grid"));
+  $("viewMap").addEventListener("click", () => state.view !== "map" && showView("map"));
 }
 
 // ---------- save all results to a folder (the server copies them; the page shows progress)
@@ -507,8 +605,10 @@ bindFilters();
 bindModal();
 bindCustomControls();
 bindExport();
+bindViews();
 loadFacets();
-load(true).then(() => {
+if (location.hash === "#map") showView("map");
+else load(true).then(() => {
   // Deep link: /#v12 opens video 12 (if it's on the first page of results).
   const m = location.hash.match(/^#v(\d+)$/);
   const index = m ? state.items.findIndex((v) => v.id === Number(m[1])) : -1;
