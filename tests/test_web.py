@@ -195,6 +195,51 @@ def test_media_stops_when_the_browser_hangs_up(tmp_path, monkeypatch):
     assert opened and all(f.wrapped.closed for f in opened)
 
 
+def test_media_answers_a_browser_that_hangs_up_at_once(client, tmp_path, monkeypatch):
+    """Browsers often drop a video request immediately (to ask for a byte range instead). If that happens before
+    the response starts, as when the file is on a slow network share, a response must still be sent: an app that
+    returns without one makes the local_only middleware fail with "No response returned"."""
+    import os
+    import time
+
+    import anyio
+    import starlette.responses
+
+    from vidcat.web.app import create_app
+
+    vid = client.get("/api/videos").json()["items"][0]
+    real_stat = os.stat
+
+    def slow_stat(path, *a, **kw):  # a file on a network share
+        time.sleep(0.2)
+        return real_stat(path, *a, **kw)
+    monkeypatch.setattr(starlette.responses.os, "stat", slow_stat)
+
+    async def main():
+        sent, asked = [], False
+
+        async def receive():
+            nonlocal asked
+            if not asked:
+                asked = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            return {"type": "http.disconnect"}  # gone straight away
+
+        async def send(message):
+            sent.append(message["type"])
+
+        path = f"/media/{vid['id']}"
+        scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"}, "http_version": "1.1",
+                 "method": "GET", "scheme": "http", "path": path, "raw_path": path.encode(), "query_string": b"",
+                 "root_path": "", "headers": [(b"host", b"127.0.0.1:8000")], "client": ("127.0.0.1", 1),
+                 "server": ("127.0.0.1", 8000)}
+        with anyio.fail_after(5):
+            await create_app(tmp_path / "web.db")(scope, receive, send)
+        return sent
+
+    assert anyio.run(main)[0] == "http.response.start"
+
+
 def test_thumbnails_served_and_lazily_created(client, tmp_path):
     vid = client.get("/api/videos").json()["items"][0]
     (tmp_path / "thumbs" / f"{vid['id']}.jpg").unlink()

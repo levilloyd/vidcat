@@ -54,6 +54,11 @@ class MediaResponse(FileResponse):
 
         async def send_unless_gone(message):
             nonlocal sending
+            if message["type"] == "http.response.start":
+                # Always sent, even after a hang-up: an app that returns without starting a response is an error
+                # (the local_only middleware raises "No response returned"). Only the file's contents are cut off.
+                await send(message)
+                return
             with anyio.CancelScope() as sending:
                 if not gone:
                     await send(message)
